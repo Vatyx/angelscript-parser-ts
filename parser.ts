@@ -1,20 +1,27 @@
 import { eScriptNode, ScriptNode } from "./scriptnode";
 import { Tokenizer } from "./tokenizer";
-import { eTokenType, EXTERNAL_TOKEN, IF_HANDLE_TOKEN, SHARED_TOKEN, Token } from "./tokens";
+import { eTokenType, EXPLICIT_TOKEN, EXTERNAL_TOKEN, FINAL_TOKEN, FUNCTION_TOKEN, IF_HANDLE_TOKEN, OVERRIDE_TOKEN, PrintToken, PROPERTY_TOKEN, SHARED_TOKEN, Token } from "./tokens";
 
 export class Parser
 {
     tokenizer: Tokenizer;
     isSyntaxError = false;
+    root: ScriptNode;
 
     constructor(source: string)
     {
         this.tokenizer = new Tokenizer(source);
+        this.root = this.CreateNode(eScriptNode.snScript);
     }
 
-    ParseScript()
+    GetRootNode() : ScriptNode
     {
-        let node = this.CreateNode(eScriptNode.snScript);
+        return this.root;
+    }
+
+    ParseScript() : ScriptNode
+    {
+        let node = this.root;
 
         while (true)
         {
@@ -24,13 +31,18 @@ export class Parser
 
                 if (token.type == eTokenType.ttEnd)
                 {
-                    return;
+                    return node;
                 }
 
                 this.RewindTo(token);
 
                 if (token.type == eTokenType.ttImport)
                 {
+                }
+
+                if (token.type == eTokenType.ttConst || token.type == eTokenType.ttScope || token.type == eTokenType.ttAuto || this.IsDataType(token))
+                {
+                    node.AddChildLast(this.ParseFunction());
                 }
 
                 // if( t1.type == ttImport )
@@ -189,6 +201,25 @@ export class Parser
         node.AddChildLast(this.ParseStatementBlock());
 
         return node;
+    }
+
+    ParseMethodAttributes(funcNode: ScriptNode)
+    {
+        let t1;
+
+        for (; ;)
+        {
+            t1 = this.GetToken();
+            this.RewindTo(t1);
+
+            if (this.IdentifierIs(t1, FINAL_TOKEN) ||
+                this.IdentifierIs(t1, OVERRIDE_TOKEN) ||
+                this.IdentifierIs(t1, EXPLICIT_TOKEN) ||
+                this.IdentifierIs(t1, PROPERTY_TOKEN))
+                funcNode.AddChildLast(this.ParseIdentifier());
+            else
+                break;
+        }
     }
 
     ParseStatementBlock(): ScriptNode
@@ -744,7 +775,7 @@ export class Parser
         node.AddChildLast(this.ParseType(true, false, !isClassProp));
         if (this.isSyntaxError) return node;
 
-        for (;;)
+        for (; ;)
         {
             // Parse identifier
             node.AddChildLast(this.ParseIdentifier());
@@ -757,7 +788,7 @@ export class Parser
                 this.RewindTo(t);
                 if (t.type == eTokenType.ttAssignment || t.type == eTokenType.ttOpenParanthesis)
                 {
-                    node.AddChildLast(this.SuperficiallyParseVarInit());
+                    // node.AddChildLast(this.SuperficiallyParseVarInit());
                     if (this.isSyntaxError) return node;
                 }
             }
@@ -791,7 +822,7 @@ export class Parser
             }
 
             // continue if list separator, else terminate with end statement
-            t = this.GetToken(t);
+            t = this.GetToken();
             if (t.type == eTokenType.ttListSeparator)
                 continue;
             else if (t.type == eTokenType.ttEndStatement)
@@ -893,6 +924,109 @@ export class Parser
         }
     }
 
+    ParseInitList(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snInitList);
+
+        let t1 = this.GetToken();
+        if (t1.type != eTokenType.ttStartStatementBlock)
+        {
+            this.Error();
+            return node;
+        }
+
+        node.UpdateSourcePosition(t1.pos, t1.length);
+
+        t1 = this.GetToken();
+        if (t1.type == eTokenType.ttEndStatementBlock)
+        {
+            node.UpdateSourcePosition(t1.pos, t1.length);
+
+            // Statement block is finished
+            return node;
+        }
+        else
+        {
+            this.RewindTo(t1);
+            for (; ;)
+            {
+                t1 = this.GetToken();
+                if (t1.type == eTokenType.ttListSeparator)
+                {
+                    // No expression
+                    node.AddChildLast(this.CreateNode(eScriptNode.snUndefined));
+                    node.lastChild?.UpdateSourcePosition(t1.pos, 1);
+
+                    t1 = this.GetToken();
+                    if (t1.type == eTokenType.ttEndStatementBlock)
+                    {
+                        // No expression
+                        node.AddChildLast(this.CreateNode(eScriptNode.snUndefined));
+                        node.lastChild?.UpdateSourcePosition(t1.pos, 1);
+                        node.UpdateSourcePosition(t1.pos, t1.length);
+                        return node;
+                    }
+
+                    this.RewindTo(t1);
+                }
+                else if (t1.type == eTokenType.ttEndStatementBlock)
+                {
+                    // No expression
+                    node.AddChildLast(this.CreateNode(eScriptNode.snUndefined));
+                    node.lastChild?.UpdateSourcePosition(t1.pos, 1);
+                    node.UpdateSourcePosition(t1.pos, t1.length);
+
+                    // Statement block is finished
+                    return node;
+                }
+                else if (t1.type == eTokenType.ttStartStatementBlock)
+                {
+                    this.RewindTo(t1);
+                    node.AddChildLast(this.ParseInitList());
+                    if (this.isSyntaxError) return node;
+
+                    t1 = this.GetToken();
+                    if (t1.type == eTokenType.ttListSeparator)
+                        continue;
+                    else if (t1.type == eTokenType.ttEndStatementBlock)
+                    {
+                        node.UpdateSourcePosition(t1.pos, t1.length);
+
+                        // Statement block is finished
+                        return node;
+                    }
+                    else
+                    {
+                        this.Error();
+                        return node;
+                    }
+                }
+                else
+                {
+                    this.RewindTo(t1);
+                    node.AddChildLast(this.ParseAssignment());
+                    if (this.isSyntaxError) return node;
+
+                    t1 = this.GetToken();
+                    if (t1.type == eTokenType.ttListSeparator)
+                        continue;
+                    else if (t1.type == eTokenType.ttEndStatementBlock)
+                    {
+                        node.UpdateSourcePosition(t1.pos, t1.length);
+
+                        // Statement block is finished
+                        return node;
+                    }
+                    else
+                    {
+                        this.Error();
+                        return node;
+                    }
+                }
+            }
+        }
+    }
+
     ParseAssignment(): ScriptNode
     {
         let node = this.CreateNode(eScriptNode.snAssignment);
@@ -973,9 +1107,518 @@ export class Parser
         return node;
     }
 
+    ParseExpression(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snExpression);
+
+        node.AddChildLast(this.ParseExprTerm());
+        if (this.isSyntaxError) 
+        {
+            return node;
+        }
+
+        for (; ;)
+        {
+            let t = this.GetToken();
+            this.RewindTo(t);
+
+            if (!this.IsOperator(t.type))
+                return node;
+
+            node.AddChildLast(this.ParseExprOperator());
+            if (this.isSyntaxError) 
+            {
+                return node;
+            }
+
+            node.AddChildLast(this.ParseExprTerm());
+            if (this.isSyntaxError) 
+            {
+                return node;
+            }
+        }
+    }
+
+    ParseExprTerm(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snExprTerm);
+
+        // Check if the expression term is an initialization of a temp object with init list, i.e. type = {...}
+        let t = this.GetToken();
+        let t2 = t, t3;
+        if (this.IsDataType(t2) && this.CheckTemplateType(t2))
+        {
+            // The next token must be a = followed by a {
+            t2 = this.GetToken();
+            t3 = this.GetToken();
+            if (t2.type == eTokenType.ttAssignment && t3.type == eTokenType.ttStartStatementBlock)
+            {
+                // It is an initialization, now parse it for real
+                this.RewindTo(t);
+                node.AddChildLast(this.ParseType(false));
+                t2 = this.GetToken();
+                node.AddChildLast(this.ParseInitList());
+                return node;
+            }
+        }
+        // Or an anonymous init list, i.e. {...}
+        else if (t.type == eTokenType.ttStartStatementBlock)
+        {
+            this.RewindTo(t);
+            node.AddChildLast(this.ParseInitList());
+            return node;
+        }
+
+        // It wasn't an initialization, so it must be an ordinary expression term
+        this.RewindTo(t);
+
+        for (; ;)
+        {
+            t = this.GetToken();
+            this.RewindTo(t);
+
+            if (!this.IsPreOperator(t.type))
+                break;
+
+            node.AddChildLast(this.ParseExprPreOp());
+            if (this.isSyntaxError)
+            {
+                return node;
+            }
+        }
+
+        node.AddChildLast(this.ParseExprValue());
+        if (this.isSyntaxError)
+        {
+            return node;
+        }
+
+        for (; ;)
+        {
+            t = this.GetToken();
+            this.RewindTo(t);
+            if (!this.IsPostOperator(t.type))
+                return node;
+
+            node.AddChildLast(this.ParseExprPostOp());
+            if (this.isSyntaxError)
+            {
+                return node;
+            }
+        }
+    }
+
+    ParseExprPreOp(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snExprPreOp);
+
+        let t = this.GetToken();
+        if (!this.IsPreOperator(t.type))
+        {
+            this.Error();
+            return node;
+        }
+
+        node.SetToken(t);
+
+        return node;
+    }
+
+    ParseExprPostOp(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snExprPostOp);
+
+        let t = this.GetToken();
+        if (!this.IsPostOperator(t.type))
+        {
+            this.Error();
+            return node;
+        }
+
+        node.SetToken(t);
+
+        if (t.type == eTokenType.ttDot)
+        {
+            let t1 = this.GetToken();
+            let t2 = this.GetToken();
+            this.RewindTo(t1);
+
+            if (t2.type == eTokenType.ttOpenParanthesis)
+                node.AddChildLast(this.ParseFunctionCall());
+            else
+                node.AddChildLast(this.ParseIdentifier());
+        }
+        else if (t.type == eTokenType.ttOpenBracket)
+        {
+            node.AddChildLast(this.ParseArgList(false));
+
+            t = this.GetToken();
+            if (t.type != eTokenType.ttCloseBracket)
+            {
+                this.Error();
+                return node;
+            }
+
+            node.UpdateSourcePosition(t.pos, t.length);
+        }
+        else if (t.type == eTokenType.ttOpenParanthesis)
+        {
+            this.RewindTo(t);
+            node.AddChildLast(this.ParseArgList());
+        }
+
+        return node;
+    }
+
+    ParseExprValue(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snExprValue);
+
+        let t1 = this.GetToken();
+        let t2 = this.GetToken();
+        this.RewindTo(t1);
+
+        console.log(PrintToken(t1, this.tokenizer.source.source));
+
+        // 'void' is a special expression that doesn't do anything (normally used for skipping output arguments)
+        if (t1.type == eTokenType.ttVoid)
+            node.AddChildLast(this.ParseToken(eTokenType.ttVoid));
+        else if (this.IsRealType(t1.type))
+            node.AddChildLast(this.ParseConstructCall());
+        else if (t1.type == eTokenType.ttIdentifier || t1.type == eTokenType.ttScope)
+        {
+            // Check if the expression is an anonymous function
+            if (this.IsLambda())
+            {
+                node.AddChildLast(this.ParseLambda());
+            }
+            else
+            {
+                // Determine the last identifier in order to check if it is a type
+                let t;
+                if (t1.type == eTokenType.ttScope) t = t2; else t = t1;
+                this.RewindTo(t);
+                t2 = this.GetToken();
+                while (t.type == eTokenType.ttIdentifier)
+                {
+                    t2 = t;
+                    t = this.GetToken();
+                    if (t.type == eTokenType.ttScope)
+                        t = this.GetToken();
+                    else
+                        break;
+                }
+
+                let isDataType = this.IsDataType(t2);
+                let isTemplateType = false;
+                if (isDataType)
+                {
+                    // Is this a template type?
+                    // tempString.Assign(& script -> code[t2.pos], t2.length);
+                    // if (engine -> IsTemplateType(tempString.AddressOf()))
+                    //     isTemplateType = true;
+                }
+
+                t2 = this.GetToken();
+
+                // Rewind so the real parsing can be done, after deciding what to parse
+                this.RewindTo(t1);
+
+                // Check if this is a construct call
+                // Just 'type()' isn't considered a construct call, because type may just be a function/method name.
+                // The compiler will have to sort this out, since the parser doesn't have enough information.
+                if (isDataType && (t.type == eTokenType.ttOpenBracket && t2.type == eTokenType.ttCloseBracket))      // type[]()
+                    node.AddChildLast(this.ParseConstructCall());
+                else if (isTemplateType && t.type == eTokenType.ttLessThan)  // type<t>()
+                    node.AddChildLast(this.ParseConstructCall());
+                else if (this.IsFunctionCall())
+                    node.AddChildLast(this.ParseFunctionCall());
+                else
+                    node.AddChildLast(this.ParseVariableAccess());
+            }
+        }
+        else if (t1.type == eTokenType.ttCast)
+            node.AddChildLast(this.ParseCast());
+        else if (this.IsConstant(t1.type))
+            node.AddChildLast(this.ParseConstant());
+        else if (t1.type == eTokenType.ttOpenParanthesis)
+        {
+            t1 = this.GetToken();
+            node.UpdateSourcePosition(t1.pos, t1.length);
+
+            node.AddChildLast(this.ParseAssignment());
+            if (this.isSyntaxError) return node;
+
+            t1 = this.GetToken();
+            if (t1.type != eTokenType.ttCloseParanthesis)
+            {
+                this.Error();
+            }
+
+            node.UpdateSourcePosition(t1.pos, t1.length);
+        }
+        else
+        {
+            this.Error();
+        }
+
+        return node;
+    }
+
+    ParseCast(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snCast);
+
+        let t1 = this.GetToken();
+        if (t1.type != eTokenType.ttCast)
+        {
+            this.Error();
+            return node;
+        }
+
+        node.UpdateSourcePosition(t1.pos, t1.length);
+
+        t1 = this.GetToken();
+        if (t1.type != eTokenType.ttLessThan)
+        {
+            this.Error();
+            return node;
+        }
+
+        // Parse the data type
+        node.AddChildLast(this.ParseType(true));
+        if (this.isSyntaxError) return node;
+
+        t1 = this.GetToken();
+        if (t1.type != eTokenType.ttGreaterThan)
+        {
+            this.Error();
+            return node;
+        }
+
+        t1 = this.GetToken();
+        if (t1.type != eTokenType.ttOpenParanthesis)
+        {
+            this.Error();
+            return node;
+        }
+
+        node.AddChildLast(this.ParseAssignment());
+        if (this.isSyntaxError) return node;
+
+        t1 = this.GetToken();
+        if (t1.type != eTokenType.ttCloseParanthesis)
+        {
+            this.Error();
+            return node;
+        }
+
+        node.UpdateSourcePosition(t1.pos, t1.length);
+
+        return node;
+    }
+
+    ParseLambda(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snFunction);
+
+        let t = this.GetToken();
+
+        if (t.type != eTokenType.ttIdentifier || !this.IdentifierIs(t, FUNCTION_TOKEN))
+        {
+            this.Error();
+            return node;
+        }
+
+        t = this.GetToken();
+        if (t.type != eTokenType.ttOpenParanthesis)
+        {
+            this.Error();
+            return node;
+        }
+
+        // Parse optional type before parameter name
+        if (this.IsType(t))// && (t.type == eTokenType.ttAmp || t.type == eTokenType.ttIdentifier))
+        {
+            node.AddChildLast(this.ParseType(true));
+            if (this.isSyntaxError) return node;
+            node.AddChildLast(this.ParseTypeMod(true));
+            if (this.isSyntaxError) return node;
+        }
+
+        t = this.GetToken();
+        if (t.type == eTokenType.ttIdentifier)
+        {
+            this.RewindTo(t);
+            node.AddChildLast(this.ParseIdentifier());
+            if (this.isSyntaxError) return node;
+
+            t = this.GetToken();
+            while (t.type == eTokenType.ttListSeparator)
+            {
+                // Parse optional type before parameter name
+                if (this.IsType(t))// && (t.type == eTokenType.ttAmp || t.type == eTokenType.ttIdentifier)) 
+                {
+                    node.AddChildLast(this.ParseType(true));
+                    if (this.isSyntaxError) return node;
+                    node.AddChildLast(this.ParseTypeMod(true));
+                    if (this.isSyntaxError) return node;
+                }
+
+                node.AddChildLast(this.ParseIdentifier());
+                if (this.isSyntaxError) return node;
+
+                t = this.GetToken();
+            }
+        }
+
+        if (t.type != eTokenType.ttCloseParanthesis)
+        {
+            this.Error();
+            return node;
+        }
+
+        // We should just find the end of the statement block here. The statements
+        // will be parsed on request by the compiler once it starts the compilation.
+        node.AddChildLast(this.ParseStatementBlock());
+
+        return node;
+    }
+
+    ParseConstructCall(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snConstructCall);
+
+        node.AddChildLast(this.ParseType(false));
+        if (this.isSyntaxError) return node;
+
+        node.AddChildLast(this.ParseArgList());
+
+        return node;
+    }
+
+    ParseFunctionCall(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snFunctionCall);
+
+        // Parse scope prefix
+        this.ParseOptionalScope(node);
+
+        // Parse the function name followed by the argument list
+        node.AddChildLast(this.ParseIdentifier());
+        if (this.isSyntaxError) return node;
+
+        node.AddChildLast(this.ParseArgList());
+
+        return node;
+    }
+
+    ParseArgList(withParenthesis: boolean = true): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snArgList);
+
+        let t1;
+        if (withParenthesis)
+        {
+            t1 = this.GetToken();
+            if (t1.type != eTokenType.ttOpenParanthesis)
+            {
+                this.Error();
+                return node;
+            }
+
+            node.UpdateSourcePosition(t1.pos, t1.length);
+        }
+
+        t1 = this.GetToken();
+        if (t1.type == eTokenType.ttCloseParanthesis || t1.type == eTokenType.ttCloseBracket)
+        {
+            if (withParenthesis)
+            {
+                if (t1.type == eTokenType.ttCloseParanthesis)
+                    node.UpdateSourcePosition(t1.pos, t1.length);
+                else
+                {
+                    this.Error();
+                }
+            }
+            else
+                this.RewindTo(t1);
+
+            // Argument list has ended
+            return node;
+        }
+        else
+        {
+            this.RewindTo(t1);
+
+            for (; ;)
+            {
+                // Determine if this is a named argument
+                let tl = this.GetToken();
+                let t2 = this.GetToken();
+                this.RewindTo(tl);
+
+                // Named arguments uses the syntax: arg : expr
+                // This avoids confusion when the argument has the same name as a local variable, i.e. var = expr
+                // It also avoids conflict with expressions to that creates anonymous objects initialized with lists, i.e. type = {...}
+                // The alternate syntax: arg = expr, is supported to provide backwards compatibility with 2.29.0
+                // TODO: 3.0.0: Remove the alternate syntax
+                if (tl.type == eTokenType.ttIdentifier && (t2.type == eTokenType.ttColon || (/*engine -> ep.alterSyntaxNamedArgs*/ true && t2.type == eTokenType.ttAssignment)))
+                {
+                    let named = this.CreateNode(eScriptNode.snNamedArgument);
+                    node.AddChildLast(named);
+
+                    named.AddChildLast(this.ParseIdentifier());
+                    t2 = this.GetToken();
+
+                    named.AddChildLast(this.ParseAssignment());
+                }
+                else
+                    node.AddChildLast(this.ParseAssignment());
+
+                if (this.isSyntaxError) return node;
+
+                // Check if list continues
+                t1 = this.GetToken();
+                if (t1.type == eTokenType.ttListSeparator)
+                    continue;
+                else
+                {
+                    if (withParenthesis)
+                    {
+                        if (t1.type == eTokenType.ttCloseParanthesis)
+                            node.UpdateSourcePosition(t1.pos, t1.length);
+                        else
+                        {
+                            this.Error();
+                        }
+                    }
+                    else
+                        this.RewindTo(t1);
+
+                    return node;
+                }
+            }
+        }
+    }
+
+    ParseVariableAccess(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snVariableAccess);
+
+        // Parse scope prefix
+        this.ParseOptionalScope(node);
+
+        // Parse the variable name
+        node.AddChildLast(this.ParseIdentifier());
+
+        return node;
+    }
+
     ParseType(allowConst: boolean, allowVariableType: boolean = false, allowAuto: boolean = false)
     {
-        let node = this.CreateNode(eScriptNode.snDataType);
+        let node = this.CreateNode(eScriptNode.snType);
 
         let token;
 
@@ -1045,6 +1688,50 @@ export class Parser
             token = this.GetToken();
             this.RewindTo(token);
         }
+
+        return node;
+    }
+
+    ParseConstant(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snConstant);
+
+        let t = this.GetToken();
+        if (!this.IsConstant(t.type))
+        {
+            this.Error();
+            return node;
+        }
+
+        node.SetToken(t);
+
+        // We want to gather a list of string constants to concatenate as children
+        if (t.type == eTokenType.ttStringConstant || t.type == eTokenType.ttMultilineStringConstant || t.type == eTokenType.ttHeredocStringConstant)
+            this.RewindTo(t);
+
+        while (t.type == eTokenType.ttStringConstant || t.type == eTokenType.ttMultilineStringConstant || t.type == eTokenType.ttHeredocStringConstant)
+        {
+            node.AddChildLast(this.ParseStringConstant());
+
+            t = this.GetToken();
+            this.RewindTo(t);
+        }
+
+        return node;
+    }
+
+    ParseStringConstant(): ScriptNode
+    {
+        let node = this.CreateNode(eScriptNode.snConstant);
+
+        let t = this.GetToken();
+        if (t.type != eTokenType.ttStringConstant && t.type != eTokenType.ttMultilineStringConstant && t.type != eTokenType.ttHeredocStringConstant)
+        {
+            this.Error();
+            return node;
+        }
+
+        node.SetToken(t);
 
         return node;
     }
@@ -1437,7 +2124,7 @@ export class Parser
                 {
                     // Template types can also be used as scope identifiers
                     this.RewindTo(t2);
-                    if (CheckTemplateType(t1))
+                    if (this.CheckTemplateType(t1))
                     {
                         let t3 = this.GetToken();
                         if (t3.type == eTokenType.ttScope)
@@ -1465,7 +2152,7 @@ export class Parser
             return false;
         }
 
-        if (!CheckTemplateType(t1))
+        if (!this.CheckTemplateType(t1))
         {
             this.RewindTo(t);
             return false;
@@ -1556,8 +2243,120 @@ export class Parser
         return false;
     }
 
+    IsPreOperator(tokenType: eTokenType): boolean
+    {
+        if (tokenType == eTokenType.ttMinus ||
+            tokenType == eTokenType.ttPlus ||
+            tokenType == eTokenType.ttNot ||
+            tokenType == eTokenType.ttInc ||
+            tokenType == eTokenType.ttDec ||
+            tokenType == eTokenType.ttBitNot ||
+            tokenType == eTokenType.ttHandle)
+            return true;
+        return false;
+    }
+
+    IsPostOperator(tokenType: eTokenType): boolean
+    {
+        if (tokenType == eTokenType.ttInc ||            // post increment
+            tokenType == eTokenType.ttDec ||            // post decrement
+            tokenType == eTokenType.ttDot ||            // member access
+            tokenType == eTokenType.ttOpenBracket ||    // index operator
+            tokenType == eTokenType.ttOpenParanthesis) // argument list for call on function pointer
+            return true;
+        return false;
+    }
+
+    IsConstant(tokenType: eTokenType): boolean
+    {
+        if (tokenType == eTokenType.ttIntConstant ||
+            tokenType == eTokenType.ttFloatConstant ||
+            tokenType == eTokenType.ttDoubleConstant ||
+            tokenType == eTokenType.ttStringConstant ||
+            tokenType == eTokenType.ttMultilineStringConstant ||
+            tokenType == eTokenType.ttHeredocStringConstant ||
+            tokenType == eTokenType.ttTrue ||
+            tokenType == eTokenType.ttFalse ||
+            tokenType == eTokenType.ttBitsConstant ||
+            tokenType == eTokenType.ttNull)
+            return true;
+
+        return false;
+    }
+
+    IsFunctionCall(): boolean
+    {
+        let s = this.GetToken();
+        let t1 = s;
+
+        // A function call may be prefixed with scope resolution
+        if (t1.type == eTokenType.ttScope)
+            t1 = this.GetToken();
+
+        let t2 = this.GetToken();
+
+        while (t1.type == eTokenType.ttIdentifier && t2.type == eTokenType.ttScope)
+        {
+            t1 = this.GetToken();
+            t2 = this.GetToken();
+        }
+
+        // A function call starts with an identifier followed by an argument list
+        // The parser doesn't have enough information about scope to determine if the
+        // identifier is a datatype, so even if it happens to be the parser will
+        // identify the expression as a function call rather than a construct call.
+        // The compiler will sort this out later
+        if (t1.type != eTokenType.ttIdentifier)
+        {
+            this.RewindTo(s);
+            return false;
+        }
+
+        if (t2.type == eTokenType.ttOpenParanthesis)
+        {
+            this.RewindTo(s);
+            return true;
+        }
+
+        this.RewindTo(s);
+        return false;
+    }
+
+    IsLambda(): boolean
+    {
+        let isLambda = false;
+        let t = this.GetToken();
+
+        if (t.type == eTokenType.ttIdentifier && this.IdentifierIs(t, FUNCTION_TOKEN))
+        {
+            let t2 = this.GetToken();
+            if (t2.type == eTokenType.ttOpenParanthesis)
+            {
+                // Skip until )
+                while (t2.type != eTokenType.ttCloseParanthesis && t2.type != eTokenType.ttEnd)
+                    t2 = this.GetToken();
+
+                // The next token must be a {
+                t2 = this.GetToken();
+                if (t2.type == eTokenType.ttStartStatementBlock)
+                    isLambda = true;
+            }
+        }
+
+        this.RewindTo(t);
+
+        return isLambda;
+    }
+
+    CheckTemplateType(t: Token): boolean
+    {
+        // Is this a template type?
+        return false;
+    }
+
     Error()
     {
         this.isSyntaxError = true;
     }
+
 }

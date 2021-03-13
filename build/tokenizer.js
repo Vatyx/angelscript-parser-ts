@@ -15,10 +15,14 @@ class IntermediateSource {
         this.start += amount;
         this.length -= amount;
     }
+    SetStart(position) {
+        this.start = position;
+        this.length = this.source.length - this.start;
+    }
 }
 exports.IntermediateSource = IntermediateSource;
 class Tokenizer {
-    constructor() {
+    constructor(sourceString) {
         this.keywordTable = {};
         tokens_1.tokenWords.forEach(element => {
             if (this.keywordTable[element.word[0]] == undefined) {
@@ -26,29 +30,62 @@ class Tokenizer {
             }
             this.keywordTable[element.word[0]].push(element);
         });
+        this.source = new IntermediateSource(sourceString);
+        this.lastToken = null;
     }
-    GetToken(source) {
-        let token = this.IsWhitespace(source);
-        if (token != null) {
-            return [token, tokens_1.asETokenClass.asTC_WHITESPACE];
+    ConsumeToken() {
+        if (this.lastToken != null && this.lastToken.pos == this.source.start) {
+            let token = this.lastToken;
+            this.source.UpdateStart(token.length);
+            if (token.type == tokens_1.eTokenType.ttWhiteSpace || token.type == tokens_1.eTokenType.ttOnelineComment || token.type == tokens_1.eTokenType.ttMultilineComment) {
+                token = this.ConsumeToken();
+            }
+            return token;
         }
-        token = this.IsComment(source);
-        if (token != null) {
-            return [token, tokens_1.asETokenClass.asTC_COMMENT];
+        let token;
+        do {
+            if (this.source.start >= this.source.source.length) {
+                token = tokens_1.CreateToken(tokens_1.eTokenType.ttEnd, this.source.start, 0, tokens_1.asETokenClass.asTC_UNKNOWN);
+            }
+            else {
+                token = this.GetToken();
+                this.source.UpdateStart(token.length);
+            }
+        } while (token.type == tokens_1.eTokenType.ttWhiteSpace || token.type == tokens_1.eTokenType.ttOnelineComment || token.type == tokens_1.eTokenType.ttMultilineComment);
+        return token;
+    }
+    RewindToToken(token) {
+        this.lastToken = token;
+        this.source.SetStart(token.pos);
+    }
+    IdentifierIs(token, identifier) {
+        if (token.type != tokens_1.eTokenType.ttIdentifier) {
+            return false;
         }
-        token = this.IsConstant(source);
+        return this.source.source.substr(token.pos, token.length) == identifier;
+    }
+    GetToken() {
+        let token = this.IsWhitespace(this.source);
         if (token != null) {
-            return [token, tokens_1.asETokenClass.asTC_VALUE];
+            return token;
         }
-        token = this.IsKeyword(source);
+        token = this.IsComment(this.source);
         if (token != null) {
-            return [token, tokens_1.asETokenClass.asTC_KEYWORD];
+            return token;
         }
-        token = this.IsIdentifier(source);
+        token = this.IsConstant(this.source);
         if (token != null) {
-            return [token, tokens_1.asETokenClass.asTC_IDENTIFIER];
+            return token;
         }
-        return [tokens_1.CreateToken(tokens_1.eTokenType.ttUnrecognizedToken, source.start, 1), tokens_1.asETokenClass.asTC_UNKNOWN];
+        token = this.IsKeyword(this.source);
+        if (token != null) {
+            return token;
+        }
+        token = this.IsIdentifier(this.source);
+        if (token != null) {
+            return token;
+        }
+        return tokens_1.CreateToken(tokens_1.eTokenType.ttUnrecognizedToken, this.source.start, 1, tokens_1.asETokenClass.asTC_UNKNOWN);
     }
     IsWhitespace(source) {
         let i;
@@ -59,7 +96,7 @@ class Tokenizer {
             }
         }
         if (i > 0) {
-            return tokens_1.CreateToken(tokens_1.eTokenType.ttWhiteSpace, source.start, i);
+            return tokens_1.CreateToken(tokens_1.eTokenType.ttWhiteSpace, source.start, i, tokens_1.asETokenClass.asTC_WHITESPACE);
         }
         return null;
     }
@@ -77,7 +114,7 @@ class Tokenizer {
                     break;
             }
             let tokenLength = n < source.length ? n + 1 : n;
-            return tokens_1.CreateToken(tokens_1.eTokenType.ttOnelineComment, source.start, tokenLength);
+            return tokens_1.CreateToken(tokens_1.eTokenType.ttOnelineComment, source.start, tokenLength, tokens_1.asETokenClass.asTC_COMMENT);
         }
         if (source.Get(1) == '*') {
             // Multi-line comment
@@ -88,7 +125,7 @@ class Tokenizer {
                     break;
             }
             let tokenLength = n + 1;
-            return tokens_1.CreateToken(tokens_1.eTokenType.ttMultilineComment, source.start, tokenLength);
+            return tokens_1.CreateToken(tokens_1.eTokenType.ttMultilineComment, source.start, tokenLength, tokens_1.asETokenClass.asTC_COMMENT);
         }
         return null;
     }
@@ -107,7 +144,7 @@ class Tokenizer {
                 else
                     break;
             }
-            return tokens_1.CreateToken(tokens_1.eTokenType.ttIdentifier, source.start, tokenLength);
+            return tokens_1.CreateToken(tokens_1.eTokenType.ttIdentifier, source.start, tokenLength, tokens_1.asETokenClass.asTC_IDENTIFIER);
         }
         return null;
     }
@@ -115,6 +152,9 @@ class Tokenizer {
         let c = source.Get(0);
         // Get all the keywords starting with this character.
         let tokenWords = this.keywordTable[c];
+        if (!tokenWords) {
+            return null;
+        }
         for (let i = 0; i < tokenWords.length; i++) {
             let keyword = tokenWords[i].word;
             if (source.length >= keyword.length) {
@@ -138,7 +178,7 @@ class Tokenizer {
                         // the start of the source matches the token
                         continue;
                     }
-                    return tokens_1.CreateToken(tokenWords[i].type, source.start, keyword.length);
+                    return tokens_1.CreateToken(tokenWords[i].type, source.start, keyword.length, tokens_1.asETokenClass.asTC_KEYWORD);
                 }
             }
         }
@@ -176,7 +216,7 @@ class Tokenizer {
                             break;
                         }
                     }
-                    return tokens_1.CreateToken(tokens_1.eTokenType.ttBitsConstant, source.start, n);
+                    return tokens_1.CreateToken(tokens_1.eTokenType.ttBitsConstant, source.start, n, tokens_1.asETokenClass.asTC_VALUE);
                 }
             }
             let n;
@@ -203,15 +243,15 @@ class Tokenizer {
                 }
                 if (n < source.length && (source.Get(n) == 'f' || source.Get(n) == 'F')) {
                     let tokenLength = n + 1;
-                    return tokens_1.CreateToken(tokens_1.eTokenType.ttFloatConstant, source.start, tokenLength);
+                    return tokens_1.CreateToken(tokens_1.eTokenType.ttFloatConstant, source.start, tokenLength, tokens_1.asETokenClass.asTC_VALUE);
                 }
                 else {
                     let tokenLength = n;
-                    return tokens_1.CreateToken(tokens_1.eTokenType.ttDoubleConstant, source.start, tokenLength);
+                    return tokens_1.CreateToken(tokens_1.eTokenType.ttDoubleConstant, source.start, tokenLength, tokens_1.asETokenClass.asTC_VALUE);
                 }
             }
             let tokenLength = n;
-            return tokens_1.CreateToken(tokens_1.eTokenType.ttIntConstant, source.start, tokenLength);
+            return tokens_1.CreateToken(tokens_1.eTokenType.ttIntConstant, source.start, tokenLength, tokens_1.asETokenClass.asTC_VALUE);
         }
         // String constant between double or single quotes
         if (source.Get(0) == '"' || source.Get(0) == '\'') {
@@ -225,7 +265,7 @@ class Tokenizer {
                         break;
                 }
                 let tokenLength = n + 3;
-                return tokens_1.CreateToken(tokens_1.eTokenType.ttHeredocStringConstant, source.start, tokenLength);
+                return tokens_1.CreateToken(tokens_1.eTokenType.ttHeredocStringConstant, source.start, tokenLength, tokens_1.asETokenClass.asTC_VALUE);
             }
             else {
                 // Normal string constant
@@ -238,7 +278,7 @@ class Tokenizer {
                         tokenType = tokens_1.eTokenType.ttMultilineStringConstant;
                     if (source.Get(n) == quote && evenSlashes) {
                         let tokenLength = n + 1;
-                        return tokens_1.CreateToken(tokenType, source.start, tokenLength);
+                        return tokens_1.CreateToken(tokenType, source.start, tokenLength, tokens_1.asETokenClass.asTC_VALUE);
                     }
                     if (source.Get(n) == '\\')
                         evenSlashes = !evenSlashes;
@@ -246,7 +286,7 @@ class Tokenizer {
                         evenSlashes = true;
                 }
                 let tokenLength = n;
-                return tokens_1.CreateToken(tokens_1.eTokenType.ttNonTerminatedStringConstant, source.start, tokenLength);
+                return tokens_1.CreateToken(tokens_1.eTokenType.ttNonTerminatedStringConstant, source.start, tokenLength, tokens_1.asETokenClass.asTC_VALUE);
             }
         }
         return null;

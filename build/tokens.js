@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.tokenWords = exports.PROPERTY_TOKEN = exports.EXPLICIT_TOKEN = exports.EXTERNAL_TOKEN = exports.IF_HANDLE_TOKEN = exports.FUNCTION_TOKEN = exports.ABSTRACT_TOKEN = exports.SET_TOKEN = exports.GET_TOKEN = exports.OVERRIDE_TOKEN = exports.FINAL_TOKEN = exports.SHARED_TOKEN = exports.SUPER_TOKEN = exports.FROM_TOKEN = exports.THIS_TOKEN = exports.whiteSpace = exports.CreateToken = exports.asETokenClass = exports.eTokenType = void 0;
+exports.tokenWords = exports.PROPERTY_TOKEN = exports.EXPLICIT_TOKEN = exports.EXTERNAL_TOKEN = exports.IF_HANDLE_TOKEN = exports.FUNCTION_TOKEN = exports.ABSTRACT_TOKEN = exports.SET_TOKEN = exports.GET_TOKEN = exports.OVERRIDE_TOKEN = exports.FINAL_TOKEN = exports.SHARED_TOKEN = exports.SUPER_TOKEN = exports.FROM_TOKEN = exports.THIS_TOKEN = exports.whiteSpace = exports.CreateToken = exports.PrintToken = exports.asETokenClass = exports.eTokenType = void 0;
 var eTokenType;
 (function (eTokenType) {
     eTokenType[eTokenType["ttUnrecognizedToken"] = 0] = "ttUnrecognizedToken";
@@ -133,8 +133,12 @@ var asETokenClass;
 })(asETokenClass = exports.asETokenClass || (exports.asETokenClass = {}));
 ;
 ;
-function CreateToken(type, pos, length) {
-    return { type: type, pos: pos, length: length };
+function PrintToken(token, source) {
+    console.log(source.substr(token.pos, token.length) + " " + eTokenType[token.type]);
+}
+exports.PrintToken = PrintToken;
+function CreateToken(type, pos, length, tokenClass) {
+    return { type: type, pos: pos, length: length, tokenClass: tokenClass };
 }
 exports.CreateToken = CreateToken;
 ;

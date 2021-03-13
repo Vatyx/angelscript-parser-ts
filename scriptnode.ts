@@ -6,6 +6,7 @@ export enum eScriptNode
     snScript,
     snFunction,
     snConstant,
+    snType,
     snDataType,
     snIdentifier,
     snParameterList,
@@ -75,6 +76,11 @@ export class ScriptNode
         this.prev = null;
         this.firstChild = null;
         this.lastChild = null;
+    }
+
+    public toString(): string
+    {
+        return eScriptNode[this.nodeType];
     }
 
     SetToken(token: Token, updateSourcePosition: boolean = true)

@@ -235,6 +235,11 @@ export class Tokenizer
         // Get all the keywords starting with this character.
         let tokenWords = this.keywordTable[c];
 
+        if (!tokenWords)
+        {
+            return null;
+        }
+
         for (let i = 0; i < tokenWords.length; i++)
         {
             let keyword = tokenWords[i].word;

@@ -152,6 +152,11 @@ export interface Token
     tokenClass: asETokenClass;
 };
 
+export function PrintToken(token: Token, source: string)
+{
+    console.log(source.substr(token.pos, token.length) + " " + eTokenType[token.type]);
+}
+
 export function CreateToken(type: eTokenType, pos: number, length: number, tokenClass: asETokenClass): Token
 {
     return { type: type, pos: pos, length: length, tokenClass: tokenClass };
