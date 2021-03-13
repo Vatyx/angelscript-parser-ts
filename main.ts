@@ -58,8 +58,13 @@ function PrintTree(tree: ScriptNode)
 console.log("Hello");
 
 let script = `
-    int Test() {
+int foo()
+{
+    if (x != 4)
+    {
+        bar(5);
     }
+}
 `
 
 let parser = new Parser(script);

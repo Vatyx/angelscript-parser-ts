@@ -2,6 +2,61 @@ import { eScriptNode, ScriptNode } from "./scriptnode";
 import { Tokenizer } from "./tokenizer";
 import { eTokenType, EXPLICIT_TOKEN, EXTERNAL_TOKEN, FINAL_TOKEN, FUNCTION_TOKEN, IF_HANDLE_TOKEN, OVERRIDE_TOKEN, PrintToken, PROPERTY_TOKEN, SHARED_TOKEN, Token } from "./tokens";
 
+var objIdMap=new WeakMap, objectCount = 0;
+function objectId(object: ScriptNode){
+  if (!objIdMap.has(object)) objIdMap.set(object,++objectCount);
+  return objIdMap.get(object) + "";
+}
+interface node {
+    id: string
+    label: string
+}
+
+interface edges {
+    from: string,
+    to: string,
+}
+
+function PrintTree(tree: ScriptNode)
+{
+    let queue = [];
+
+    queue.push(tree);
+
+    let nodes: node[] = [];
+    let edges: edges[] = [];
+
+    while(queue.length > 0)
+    {
+        let elem = queue.shift();
+
+        if (!elem)
+        {
+            break;
+        }
+        
+        nodes.push({id: objectId(elem), label: eScriptNode[elem.nodeType]});
+
+        for(let child: ScriptNode | null | undefined = elem.firstChild; child; child = child.next)
+        {
+            edges.push({from: objectId(elem), to: objectId(child)})
+            if (child as ScriptNode)
+            {
+                queue.push(child);
+            }
+        }
+    }
+
+    return {
+        "kind": { "graph": true },
+        "nodes": nodes,
+        "edges": edges,
+    }
+}
+
+const _global = globalThis as any;
+_global.PrintTree = PrintTree;
+
 export class Parser
 {
     tokenizer: Tokenizer;
@@ -156,7 +211,12 @@ export class Parser
             node.AddChildLast(this.ParseType(true));
             if (this.isSyntaxError) return node;
 
-            node.AddChildLast(this.ParseTypeMod(false));
+            var typemod = this.ParseTypeMod(false);
+            if (typemod)
+            {
+                node.AddChildLast(typemod);
+            }
+
             if (this.isSyntaxError) return node;
         }
 
@@ -238,7 +298,7 @@ export class Parser
 
         node.UpdateSourcePosition(t1.pos, t1.length);
 
-        for (; ;)
+        for (;;)
         {
             while (!this.isSyntaxError)
             {
@@ -880,7 +940,12 @@ export class Parser
                 node.AddChildLast(this.ParseType(true));
                 if (this.isSyntaxError) return node;
 
-                node.AddChildLast(this.ParseTypeMod(true));
+                let typemod = this.ParseTypeMod(true)
+                if (typemod)
+                {
+                    node.AddChildLast(typemod);
+                }
+
                 if (this.isSyntaxError) return node;
 
                 // Parse optional identifier
@@ -1037,6 +1102,8 @@ export class Parser
         let t = this.GetToken();
         this.RewindTo(t);
 
+        PrintToken(t, this.tokenizer.source.source);
+
         if (this.IsAssignOperator(t.type))
         {
             node.AddChildLast(this.ParseAssignOperator());
@@ -1145,7 +1212,8 @@ export class Parser
 
         // Check if the expression term is an initialization of a temp object with init list, i.e. type = {...}
         let t = this.GetToken();
-        let t2 = t, t3;
+        let t2 = t;
+        let t3;
         if (this.IsDataType(t2) && this.CheckTemplateType(t2))
         {
             // The next token must be a = followed by a {
@@ -1172,7 +1240,7 @@ export class Parser
         // It wasn't an initialization, so it must be an ordinary expression term
         this.RewindTo(t);
 
-        for (; ;)
+        for (;;)
         {
             t = this.GetToken();
             this.RewindTo(t);
@@ -1188,12 +1256,13 @@ export class Parser
         }
 
         node.AddChildLast(this.ParseExprValue());
+
         if (this.isSyntaxError)
         {
             return node;
         }
 
-        for (; ;)
+        for (;;)
         {
             t = this.GetToken();
             this.RewindTo(t);
@@ -1279,6 +1348,7 @@ export class Parser
         this.RewindTo(t1);
 
         console.log(PrintToken(t1, this.tokenizer.source.source));
+        console.log(PrintToken(t2, this.tokenizer.source.source));
 
         // 'void' is a special expression that doesn't do anything (normally used for skipping output arguments)
         if (t1.type == eTokenType.ttVoid)
@@ -1438,11 +1508,18 @@ export class Parser
         }
 
         // Parse optional type before parameter name
-        if (this.IsType(t))// && (t.type == eTokenType.ttAmp || t.type == eTokenType.ttIdentifier))
+        var isTypeResult = this.IsType();
+        if (isTypeResult[0])// && (t.type == eTokenType.ttAmp || t.type == eTokenType.ttIdentifier))
         {
             node.AddChildLast(this.ParseType(true));
             if (this.isSyntaxError) return node;
-            node.AddChildLast(this.ParseTypeMod(true));
+
+            let typemod = this.ParseTypeMod(true);
+            if (typemod)
+            {
+                node.AddChildLast(typemod);
+            }
+
             if (this.isSyntaxError) return node;
         }
 
@@ -1457,11 +1534,18 @@ export class Parser
             while (t.type == eTokenType.ttListSeparator)
             {
                 // Parse optional type before parameter name
-                if (this.IsType(t))// && (t.type == eTokenType.ttAmp || t.type == eTokenType.ttIdentifier)) 
+                var isTypeResult = this.IsType();
+                if (isTypeResult[0])// && (t.type == eTokenType.ttAmp || t.type == eTokenType.ttIdentifier)) 
                 {
                     node.AddChildLast(this.ParseType(true));
                     if (this.isSyntaxError) return node;
-                    node.AddChildLast(this.ParseTypeMod(true));
+
+                    let typemod = this.ParseTypeMod(true);
+                    if (typemod)
+                    {
+                        node.AddChildLast(typemod);
+                    }
+
                     if (this.isSyntaxError) return node;
                 }
 
@@ -1843,9 +1927,9 @@ export class Parser
         return node;
     }
 
-    ParseTypeMod(isParam: boolean): ScriptNode
+    ParseTypeMod(isParam: boolean): ScriptNode | null
     {
-        let node = this.CreateNode(eScriptNode.snDataType);
+        let node = this.CreateNode(eScriptNode.snTypemod);
 
         // Parse possible & token
         let token = this.GetToken();
@@ -1886,7 +1970,7 @@ export class Parser
             if (this.isSyntaxError) return node;
         }
 
-        return node;
+        return null;
     }
 
     ParseExprOperator(): ScriptNode
@@ -2020,10 +2104,16 @@ export class Parser
         }
 
         // A variable decl starts with the type
-        if (!this.IsType(t1))
+        var isTypeResult = this.IsType();
+        if (!isTypeResult[0])
         {
             this.RewindTo(t);
             return false;
+        }
+
+        if (isTypeResult[1] != null)
+        {
+            t1 = isTypeResult[1];
         }
 
         // Jump to the token after the type
@@ -2093,7 +2183,7 @@ export class Parser
 
     // nextToken is only modified if the current position can be interpreted as
     // type, in this case it is set to the next token after the type tokens
-    IsType(nextToken: Token): boolean
+    IsType(): [boolean, Token | null]
     {
         // Set a rewind point
         let t = this.GetToken();
@@ -2149,13 +2239,13 @@ export class Parser
         if (!this.IsRealType(t1.type) && t1.type != eTokenType.ttIdentifier && t1.type != eTokenType.ttAuto)
         {
             this.RewindTo(t);
-            return false;
+            return [false, null];
         }
 
         if (!this.CheckTemplateType(t1))
         {
             this.RewindTo(t);
-            return false;
+            return [false, null];
         }
 
         // Object handles can be interleaved with the array brackets
@@ -2177,20 +2267,17 @@ export class Parser
                 if (t2.type != eTokenType.ttCloseBracket)
                 {
                     this.RewindTo(t);
-                    return false;
+                    return [false, null];
                 }
             }
 
             t2 = this.GetToken();
         }
 
-        // Return the next token so the caller can jump directly to it if desired
-        nextToken = t2;
-
         // Rewind to start point
         this.RewindTo(t);
 
-        return true;
+        return [true, t2];
     }
 
     IsOperator(tokenType: eTokenType): boolean
@@ -2351,11 +2438,12 @@ export class Parser
     CheckTemplateType(t: Token): boolean
     {
         // Is this a template type?
-        return false;
+        return true;
     }
 
     Error()
     {
+        console.log("There was an error");
         this.isSyntaxError = true;
     }
 

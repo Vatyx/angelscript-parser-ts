@@ -7,6 +7,7 @@ export enum eScriptNode
     snFunction,
     snConstant,
     snType,
+    snTypemod,
     snDataType,
     snIdentifier,
     snParameterList,

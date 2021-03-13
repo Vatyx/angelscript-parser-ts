@@ -34,8 +34,13 @@ function PrintTree(tree) {
 }
 console.log("Hello");
 let script = `
-    int Test() {
+int foo()
+{
+    if (x != 4)
+    {
+        bar(5);
     }
+}
 `;
 let parser = new parser_1.Parser(script);
 let root = parser.GetRootNode();
