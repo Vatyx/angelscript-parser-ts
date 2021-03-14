@@ -30,6 +30,10 @@ class Tokenizer {
             }
             this.keywordTable[element.word[0]].push(element);
         });
+        Object.keys(this.keywordTable).forEach(key => {
+            let keywords = this.keywordTable[key];
+            keywords.sort((a, b) => b.word.length - a.word.length);
+        });
         this.source = new IntermediateSource(sourceString);
         this.lastToken = null;
     }

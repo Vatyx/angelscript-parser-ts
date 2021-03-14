@@ -309,6 +309,7 @@ class Parser {
         if (this.isSyntaxError)
             return node;
         t = this.GetToken();
+        console.log(tokens_1.PrintToken(t, this.tokenizer.source.source));
         if (t.type != tokens_1.eTokenType.ttCloseParanthesis) {
             this.Error();
             return node;
@@ -987,8 +988,6 @@ class Parser {
         let t1 = this.GetToken();
         let t2 = this.GetToken();
         this.RewindTo(t1);
-        console.log(tokens_1.PrintToken(t1, this.tokenizer.source.source));
-        console.log(tokens_1.PrintToken(t2, this.tokenizer.source.source));
         // 'void' is a special expression that doesn't do anything (normally used for skipping output arguments)
         if (t1.type == tokens_1.eTokenType.ttVoid)
             node.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttVoid));
@@ -1520,7 +1519,8 @@ class Parser {
     }
     IsDataType(token) {
         if (token.type == tokens_1.eTokenType.ttIdentifier) {
-            return true;
+            // Something with builder-DoesTypeExist
+            return false;
         }
         if (this.IsRealType(token.type))
             return true;

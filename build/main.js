@@ -36,9 +36,9 @@ console.log("Hello");
 let script = `
 int foo()
 {
-    if (x != 4)
+    for (int i = 0; i < 10; i++)
     {
-        bar(5);
+        foo(x != false);
     }
 }
 `;
