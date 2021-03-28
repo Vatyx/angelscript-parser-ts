@@ -1,6 +1,4 @@
-import { Parser } from "./parser";
-import { eScriptNode, ScriptNode } from "./scriptnode";
-import { eTokenType } from "./tokens";
+import { Parser, eScriptNode, ScriptNode } from "..";
 
 var objIdMap=new WeakMap, objectCount = 0;
 function objectId(object: ScriptNode){
