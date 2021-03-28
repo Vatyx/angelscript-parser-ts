@@ -2405,10 +2405,70 @@ export class Parser
         return true;
     }
 
-    Error()
+    Warning (text: string, token: Token) {
+        this.warnings.push(
+            new asInfo(
+                text,
+                token,
+            ),
+        );
+    }
+
+	Info (text: string, token: Token)
+	{
+		this.RewindTo(token);
+		this.isSyntaxError = true;
+
+        this.infos.push(
+            new asInfo(
+                text,
+                token,
+            ),
+        );
+	}
+
+	Error(text: string, token: Token)
     {
-        console.log("There was an error");
+		this.RewindTo(token);
         this.isSyntaxError = true;
+
+        this.errors.push(
+            new asError(
+                text,
+                token,
+            ),
+        );
+	}
+
+	ExpectedToken(token: string)
+	{
+		return TXT_EXPECTED_s.Format(token);
+	}
+
+	ExpectedTokens(t1: string, t2: string)
+	{
+		return TXT_EXPECTED_s_OR_s.Format(t1, t2);
+	}
+
+	ExpectedOneOf (tokens: string[]): string;
+	ExpectedOneOf (tokens: eTokenType[]): string;
+	ExpectedOneOf (tokens: (eTokenType[] | string[])): string
+	{
+		if (tokens.length && (typeof tokens[0] !== 'string')) {
+            tokens = tokens as eTokenType[];
+			return TXT_EXPECTED_ONE_OF + tokens.join(', ');
+		}
+		return TXT_EXPECTED_ONE_OF + tokens.join(', ');
+	}
+
+	InsteadFound (t: Token)
+	{
+		if(t.type == eTokenType.ttIdentifier)
+			return TXT_INSTEAD_FOUND_IDENTIFIER_s.Format(this.tokenizer.source.source.substr(t.pos, t.length));
+		else if(t.type >= eTokenType.ttIf)
+			return TXT_INSTEAD_FOUND_KEYWORD_s.Format(this.tokenizer.GetDefinition(t.type));
+		else
+			return TXT_INSTEAD_FOUND_s.Format(this.tokenizer.GetDefinition(t.type));
     }
 
 }
