@@ -422,4 +422,28 @@ export class Tokenizer
         if (ch >= 'a' && ch <= 'z') return (ch.charCodeAt(0) - 'a'.charCodeAt(0) - 10) < radix;
         return false;
     }
+
+	GetDefinition(tokenType: number)
+	{
+		if( tokenType == eTokenType.ttUnrecognizedToken				) return "<unrecognized token>";
+		if( tokenType == eTokenType.ttEnd							) return "<end of file>";
+		if( tokenType == eTokenType.ttWhiteSpace					) return "<white space>";
+		if( tokenType == eTokenType.ttOnelineComment				) return "<one line comment>";
+		if( tokenType == eTokenType.ttMultilineComment				) return "<multiple lines comment>";
+		if( tokenType == eTokenType.ttIdentifier					) return "<identifier>";
+		if( tokenType == eTokenType.ttIntConstant					) return "<integer constant>";
+		if( tokenType == eTokenType.ttFloatConstant					) return "<float constant>";
+		if( tokenType == eTokenType.ttDoubleConstant				) return "<double constant>";
+		if( tokenType == eTokenType.ttStringConstant				) return "<string constant>";
+		if( tokenType == eTokenType.ttMultilineStringConstant		) return "<multiline string constant>";
+		if( tokenType == eTokenType.ttNonTerminatedStringConstant	) return "<nonterminated string constant>";
+		if( tokenType == eTokenType.ttBitsConstant					) return "<bits constant>";
+		if( tokenType == eTokenType.ttHeredocStringConstant			) return "<heredoc string constant>";
+
+		for(let n = 0; n < tokenWords.length; n++)
+			if(tokenWords[n].type == tokenType)
+				return tokenWords[n].word;
+
+		return "";
+	}
 }
