@@ -206,7 +206,7 @@ export class Parser
         let token2 = this.GetToken();
         this.RewindTo(token);
 
-        if (!isMethod || (token.type != eTokenType.ttBitNot && token.type != eTokenType.ttOpenParanthesis))
+        if (!isMethod || (token.type != eTokenType.ttBitNot && token2.type != eTokenType.ttOpenParanthesis))
         {
             node.AddChildLast(this.ParseType(true));
             if (this.isSyntaxError) return node;
