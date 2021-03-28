@@ -294,8 +294,6 @@ export class Parser
             return node;
         }
 
-        let start = t1;
-
         node.UpdateSourcePosition(t1.pos, t1.length);
 
         for (;;)
@@ -2435,7 +2433,7 @@ export class Parser
         return isLambda;
     }
 
-    CheckTemplateType(t: Token): boolean
+    CheckTemplateType(_: Token): boolean
     {
         // Is this a template type?
         return true;
