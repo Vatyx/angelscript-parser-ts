@@ -1,6 +1,48 @@
-import { eScriptNode, ScriptNode } from "./scriptnode";
-import { Tokenizer } from "./tokenizer";
-import { eTokenType, EXPLICIT_TOKEN, EXTERNAL_TOKEN, FINAL_TOKEN, FUNCTION_TOKEN, IF_HANDLE_TOKEN, OVERRIDE_TOKEN, PrintToken, PROPERTY_TOKEN, SHARED_TOKEN, Token } from "./tokens";
+import { eScriptNode, ScriptNode } from './scriptnode';
+import {
+	TXT_AUTO_NOT_ALLOWED,
+	TXT_EXPECTED_CONSTANT,
+	TXT_EXPECTED_DATA_TYPE,
+	TXT_EXPECTED_EXPRESSION_VALUE,
+	TXT_EXPECTED_IDENTIFIER,
+	TXT_EXPECTED_METHOD_OR_PROPERTY,
+	TXT_EXPECTED_ONE_OF,
+	TXT_EXPECTED_OPERATOR,
+	TXT_EXPECTED_POST_OPERATOR,
+	TXT_EXPECTED_PRE_OPERATOR,
+	TXT_EXPECTED_s,
+	TXT_EXPECTED_STRING,
+	TXT_EXPECTED_s_OR_s,
+	TXT_IDENTIFIER_s_NOT_DATA_TYPE,
+	TXT_INSTEAD_FOUND_IDENTIFIER_s,
+	TXT_INSTEAD_FOUND_KEYWORD_s,
+	TXT_INSTEAD_FOUND_s,
+	TXT_NONTERMINATED_STRING,
+	TXT_UNEXPECTED_END_OF_FILE,
+	TXT_UNEXPECTED_TOKEN_s,
+	TXT_UNEXPECTED_VAR_DECL,
+	TXT_WHILE_PARSING_ARG_LIST,
+	TXT_WHILE_PARSING_EXPRESSION,
+	TXT_WHILE_PARSING_NAMESPACE,
+	TXT_WHILE_PARSING_STATEMENT_BLOCK,
+} from './texts';
+import { Tokenizer } from './tokenizer';
+import {
+	ABSTRACT_TOKEN,
+	eTokenType,
+	EXPLICIT_TOKEN,
+	EXTERNAL_TOKEN,
+	FINAL_TOKEN,
+	FROM_TOKEN,
+	FUNCTION_TOKEN,
+	GET_TOKEN,
+	IF_HANDLE_TOKEN,
+	OVERRIDE_TOKEN,
+	PROPERTY_TOKEN,
+	SET_TOKEN,
+	SHARED_TOKEN,
+	Token,
+} from './tokens';
 
 export abstract class asProblem extends Error {
     constructor(
@@ -40,7 +82,7 @@ export class Parser
         return this.root;
     }
 
-    ParseScript() : ScriptNode
+    ParseScript(inBlock = false) : ScriptNode
     {
         let node = this.root;
 
@@ -48,68 +90,89 @@ export class Parser
         {
             while (!this.isSyntaxError)
             {
-                let token = this.GetToken();
+				const tStart = this.GetToken();
 
-                if (token.type == eTokenType.ttEnd)
+				// Optimize by skipping tokens 'shared', 'external', 'final', 'abstract' so they don't have to be checked in every condition
+				let t1 = tStart;
+				while (this.tokenizer.IdentifierIs(t1, SHARED_TOKEN)
+					|| this.tokenizer.IdentifierIs(t1, EXTERNAL_TOKEN)
+					|| this.tokenizer.IdentifierIs(t1, FINAL_TOKEN)
+					|| this.tokenizer.IdentifierIs(t1, ABSTRACT_TOKEN)
+				) {
+					t1 = this.GetToken();
+				}
+
+				this.RewindTo(tStart);
+
+				if( t1.type == eTokenType.ttImport )
+					node.AddChildLast(this.ParseImport());
+				else if(t1.type == eTokenType.ttEnum)
+					node.AddChildLast(this.ParseEnumeration());	// Handle enumerations
+				else if(t1.type == eTokenType.ttTypedef)
+					node.AddChildLast(this.ParseTypedef());		// Handle primitive typedefs
+				else if(t1.type == eTokenType.ttClass)
+					node.AddChildLast(this.ParseClass());
+				else if(t1.type == eTokenType.ttMixin)
+					node.AddChildLast(this.ParseMixin());
+				else if(t1.type == eTokenType.ttInterface)
+					node.AddChildLast(this.ParseInterface());
+				else if(t1.type == eTokenType.ttFuncDef)
+					node.AddChildLast(this.ParseFuncDef());
+				else if(t1.type == eTokenType.ttConst || t1.type == eTokenType.ttScope || t1.type == eTokenType.ttAuto || this.IsDataType(t1) )
+				{
+					if( this.IsVirtualPropertyDecl() )
+						node.AddChildLast(this.ParseVirtualPropertyDecl(false, false));
+					else if( this.IsVarDecl() )
+						node.AddChildLast(this.ParseDeclaration(false, true));
+					else
+						node.AddChildLast(this.ParseFunction());
+				}
+				else if( t1.type == eTokenType.ttEndStatement )
+				{
+					// Ignore a semicolon by itself
+					t1 = this.GetToken();
+				}
+				else if (t1.type == eTokenType.ttNamespace)
+					node.AddChildLast(this.ParseNamespace());
+				else if (t1.type == eTokenType.ttEnd)
+					return node;
+				else if (inBlock && t1.type == eTokenType.ttEndStatementBlock)
+					return node;
+				else
+				{
+					let t: string = this.tokenizer.GetDefinition(t1.type);
+					if (!t) t = "<unknown token>";
+
+					const str = TXT_UNEXPECTED_TOKEN_s;
+
+					this.Error(str, t1);
+				}
+            }
+
+            if (this.isSyntaxError)
+            {
+                // Search for either ';' or '{' or end
+                let t1 = this.GetToken();
+
+                while(t1.type != eTokenType.ttEndStatement
+                    && t1.type != eTokenType.ttEnd
+                    && t1.type != eTokenType.ttStartStatementBlock)
+                    t1 = this.GetToken();
+
+                if( t1.type == eTokenType.ttStartStatementBlock )
                 {
-                    return node;
+                    // Find the end of the block and skip nested blocks
+                    let level = 1;
+                    while(level > 0)
+                    {
+                        t1 = this.GetToken();
+                        if( t1.type == eTokenType.ttStartStatementBlock ) level++;
+                        if( t1.type == eTokenType.ttEndStatementBlock ) level--;
+                        if( t1.type == eTokenType.ttEnd ) break;
+                    }
                 }
 
-                this.RewindTo(token);
-
-                if (token.type == eTokenType.ttImport)
-                {
-                }
-
-                if (token.type == eTokenType.ttConst || token.type == eTokenType.ttScope || token.type == eTokenType.ttAuto || this.IsDataType(token))
-                {
-                    node.AddChildLast(this.ParseFunction());
-                }
-
-                // if( t1.type == ttImport )
-                //     node->AddChildLast(ParseImport());
-                // else if( t1.type == ttEnum )
-                //     node->AddChildLast(ParseEnumeration());	// Handle enumerations
-                // else if( t1.type == ttTypedef )
-                //     node->AddChildLast(ParseTypedef());		// Handle primitive typedefs
-                // else if( t1.type == ttClass )
-                //     node->AddChildLast(ParseClass());
-                // else if( t1.type == ttMixin )
-                //     node->AddChildLast(ParseMixin());
-                // else if( t1.type == ttInterface )
-                //     node->AddChildLast(ParseInterface());
-                // else if( t1.type == ttFuncDef )
-                //     node->AddChildLast(ParseFuncDef());
-                // else if( t1.type == ttConst || t1.type == ttScope || t1.type == ttAuto || IsDataType(t1) )
-                // {
-                //     if( IsVirtualPropertyDecl() )
-                //         node->AddChildLast(ParseVirtualPropertyDecl(false, false));
-                //     else if( IsVarDecl() )
-                //         node->AddChildLast(ParseDeclaration(false, true));
-                //     else
-                //         node->AddChildLast(ParseFunction());
-                // }
-                // else if( t1.type == ttEndStatement )
-                // {
-                //     // Ignore a semicolon by itself
-                //     GetToken(&t1);
-                // }
-                // else if( t1.type == ttNamespace )
-                //     node->AddChildLast(ParseNamespace());
-                // else if( t1.type == ttEnd )
-                //     return node;
-                // else if( inBlock && t1.type == ttEndStatementBlock )
-                //     return node;
-                // else
-                // {
-                //     asCString str;
-                //     const char *t = asCTokenizer::GetDefinition(t1.type);
-                //     if( t == 0 ) t = "<unknown token>";
-
-                //     str.Format(TXT_UNEXPECTED_TOKEN_s, t);
-
-                //     Error(str, &t1);
-                // }
+                this.isSyntaxError = false;
             }
         }
     }
@@ -122,6 +185,786 @@ export class Parser
     GetToken = () => this.tokenizer.ConsumeToken();
     RewindTo = (token: Token) => this.tokenizer.RewindToToken(token);
     IdentifierIs = (token: Token, identifier: string) => this.tokenizer.IdentifierIs(token, identifier);
+
+	ParseImport(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snImport);
+
+		let t = this.GetToken();
+
+		if(t.type != eTokenType.ttImport)
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttImport)), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.SetToken(t);
+		node.UpdateSourcePosition(t.pos, t.length);
+
+		node.AddChildLast(this.ParseFunctionDefinition());
+		if(this.isSyntaxError) return node;
+
+		t = this.GetToken();
+		if( t.type != eTokenType.ttIdentifier )
+		{
+			this.Error(this.ExpectedToken(FROM_TOKEN), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		/**
+		 *
+		 * tempString.Assign(&script->code[t.pos], t.length);
+		 * if( tempString != FROM_TOKEN )
+		 * {
+		 * 	Error(ExpectedToken(FROM_TOKEN), &t);
+		 * 	Error(InsteadFound(t), &t);
+		 * 	return node;
+		 * }
+		 *
+		 */
+		if(this.tokenizer.source.source.substr(t.pos, t.length) != FROM_TOKEN)
+		{
+			this.Error(this.ExpectedToken(FROM_TOKEN), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t.pos, t.length);
+
+		t = this.GetToken();
+		if( t.type != eTokenType.ttStringConstant )
+		{
+			this.Error(TXT_EXPECTED_STRING, t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		const mod = this.CreateNode(eScriptNode.snConstant);
+
+		node.AddChildLast(mod);
+
+		mod.SetToken(t);
+		mod.UpdateSourcePosition(t.pos, t.length);
+
+		t = this.GetToken();
+		if( t.type != eTokenType.ttEndStatement )
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttEndStatement)), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t.pos, t.length);
+
+		return node;
+	}
+
+	ParseNamespace(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snNamespace);
+
+		let t1 = this.GetToken();
+
+		if(t1.type == eTokenType.ttNamespace)
+			node.UpdateSourcePosition(t1.pos, t1.length);
+		else
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttNamespace)), t1);
+			this.Error(this.InsteadFound(t1), t1);
+		}
+
+		// TODO: namespace: Allow declaration of multiple nested namespace with namespace A::B::C { }
+		node.AddChildLast(this.ParseIdentifier());
+		if (this.isSyntaxError) return node;
+
+		t1 = this.GetToken();
+		if (t1.type == eTokenType.ttStartStatementBlock)
+			node.UpdateSourcePosition(t1.pos, t1.length);
+		else
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttStartStatementBlock)), t1);
+			this.Error(this.InsteadFound(t1), t1);
+			return node;
+		}
+
+		let start = t1;
+
+		node.AddChildLast(this.ParseScript(true));
+
+		if (!this.isSyntaxError)
+		{
+			t1 = this.GetToken();
+			if (t1.type == eTokenType.ttEndStatementBlock)
+				node.UpdateSourcePosition(t1.pos, t1.length);
+			else
+			{
+				if (t1.type == eTokenType.ttEnd)
+					this.Error(TXT_UNEXPECTED_END_OF_FILE, t1);
+				else
+				{
+					this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttEndStatementBlock)), t1);
+					this.Error(this.InsteadFound(t1), t1);
+				}
+				this.Info(TXT_WHILE_PARSING_NAMESPACE, start);
+				return node;
+			}
+		}
+
+		return node;
+	}
+
+	ParseEnumeration(): ScriptNode
+	{
+		let ident: ScriptNode;
+		let dataType: ScriptNode;
+
+		const node = this.CreateNode(eScriptNode.snEnum);
+
+		let token = this.GetToken();
+
+		while( this.IdentifierIs(token, SHARED_TOKEN) ||
+			   this.IdentifierIs(token, EXTERNAL_TOKEN) )
+		{
+			this.RewindTo(token);
+			node.AddChildLast(this.ParseIdentifier());
+			if( this.isSyntaxError ) return node;
+
+			token = this.GetToken();
+		}
+
+		// Check for enum
+		if( token.type != eTokenType.ttEnum )
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttEnum)), token);
+			this.Error(this.InsteadFound(token), token);
+			return node;
+		}
+
+		node.SetToken(token);
+		node.UpdateSourcePosition(token.pos, token.length);
+
+		// Get the identifier
+		token = this.GetToken();
+		if(eTokenType.ttIdentifier != token.type)
+		{
+			this.Error(TXT_EXPECTED_IDENTIFIER, token);
+			this.Error(this.InsteadFound(token), token);
+			return node;
+		}
+
+		dataType = this.CreateNode(eScriptNode.snDataType);
+
+		node.AddChildLast(dataType);
+
+		ident = this.CreateNode(eScriptNode.snIdentifier);
+
+		ident.SetToken(token);
+		ident.UpdateSourcePosition(token.pos, token.length);
+		dataType.AddChildLast(ident);
+
+		// External shared declarations are ended with ';'
+		token = this.GetToken();
+		if (token.type == eTokenType.ttEndStatement)
+		{
+			this.RewindTo(token);
+			node.AddChildLast(this.ParseToken(eTokenType.ttEndStatement));
+			return node;
+		}
+
+		// check for the start of the declaration block
+		if(token.type != eTokenType.ttStartStatementBlock)
+		{
+			this.RewindTo(token);
+			const tokens = [eTokenType.ttStartStatementBlock, eTokenType.ttEndStatement];
+			this.Error(this.ExpectedOneOf(tokens), token);
+			this.Error(this.InsteadFound(token), token);
+			return node;
+		}
+
+		while((eTokenType.ttEnd as any) != token.type)
+		{
+			token = this.GetToken();
+
+			if(eTokenType.ttEndStatementBlock == token.type)
+			{
+				this.RewindTo(token);
+				break;
+			}
+
+			if(eTokenType.ttIdentifier != token.type)
+			{
+				this.Error(TXT_EXPECTED_IDENTIFIER, token);
+				this.Error(this.InsteadFound(token), token);
+				return node;
+			}
+
+			// Add the enum element
+			ident = this.CreateNode(eScriptNode.snIdentifier);
+
+			ident.SetToken(token);
+			ident.UpdateSourcePosition(token.pos, token.length);
+			node.AddChildLast(ident);
+
+			token = this.GetToken();
+
+			if(token.type == eTokenType.ttAssignment)
+			{
+				this.RewindTo(token);
+
+				const tmp = this.SuperficiallyParseVarInit();
+
+				node.AddChildLast(tmp);
+				if( this.isSyntaxError ) return node;
+
+				token = this.GetToken();
+			}
+
+			if(eTokenType.ttListSeparator != token.type)
+			{
+				this.RewindTo(token);
+				break;
+			}
+		}
+
+		// check for the end of the declaration block
+		token = this.GetToken();
+		if(token.type != eTokenType.ttEndStatementBlock)
+		{
+			this.RewindTo(token);
+			this.Error(this.ExpectedToken("}"), token);
+			this.Error(this.InsteadFound(token), token);
+			return node;
+		}
+
+		return node;
+	}
+
+	ParseTypedef(): ScriptNode
+	{
+		// Create the typedef node
+		const node = this.CreateNode(eScriptNode.snTypedef);
+
+		let token = this.GetToken();
+
+		if(token.type != eTokenType.ttTypedef)
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttTypedef)), token);
+			this.Error(this.InsteadFound(token), token);
+			return node;
+		}
+
+		node.SetToken(token);
+		node.UpdateSourcePosition(token.pos, token.length);
+
+		// Parse the base type
+		token = this.GetToken();
+		this.RewindTo(token);
+
+		// Make sure it is a primitive type (except ttVoid)
+		if(!this.IsRealType(token.type) || token.type == eTokenType.ttVoid)
+		{
+			const str = TXT_UNEXPECTED_TOKEN_s.Format(this.tokenizer.GetDefinition(token.type));
+			this.Error(str, token);
+			return node;
+		}
+
+		node.AddChildLast(this.ParseRealType());
+		node.AddChildLast(this.ParseIdentifier());
+
+		// Check for the end of the typedef
+		token = this.GetToken();
+		if(token.type != eTokenType.ttEndStatement)
+		{
+			this.RewindTo(token);
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(token.type)), token);
+			this.Error(this.InsteadFound(token), token);
+		}
+
+		return node;
+	}
+
+	ParseRealType(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snDataType);
+
+		let t1 = this.GetToken();
+
+		if (!this.IsRealType(t1.type))
+		{
+			this.Error(TXT_EXPECTED_DATA_TYPE, t1);
+			this.Error(this.InsteadFound(t1), t1);
+			return node;
+		}
+
+		node.SetToken(t1);
+		node.UpdateSourcePosition(t1.pos, t1.length);
+
+		return node;
+	}
+
+	ParseFunctionDefinition(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snFunction);
+
+		node.AddChildLast(this.ParseType(true));
+		if (this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseTypeMod(false));
+		if (this.isSyntaxError) return node;
+
+		this.ParseOptionalScope(node);
+
+		node.AddChildLast(this.ParseIdentifier());
+		if (this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseParameterList());
+		if (this.isSyntaxError) return node;
+
+		// Parse an optional 'const' after the function definition (used for object methods)
+		let t1 = this.GetToken();
+		this.RewindTo(t1);
+
+		if (t1.type == eTokenType.ttConst)
+			node.AddChildLast(this.ParseToken(eTokenType.ttConst));
+
+		// Parse optional attributes
+		this.ParseMethodAttributes(node);
+
+		return node;
+	}
+
+	ParseClass(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snClass);
+
+		let t = this.GetToken();
+
+		// Allow the keywords 'shared', 'abstract', 'final', and 'external' before 'class'
+		while (this.IdentifierIs(t, SHARED_TOKEN)
+			|| this.IdentifierIs(t, ABSTRACT_TOKEN)
+			|| this.IdentifierIs(t, FINAL_TOKEN)
+			|| this.IdentifierIs(t, EXTERNAL_TOKEN)
+		) {
+			this.RewindTo(t);
+			node.AddChildLast(this.ParseIdentifier());
+			t = this.GetToken();
+		}
+
+		if( t.type != eTokenType.ttClass )
+		{
+			this.Error(this.ExpectedToken("class"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.SetToken(t);
+
+		/**
+		 * if( engine->ep.allowImplicitHandleTypes )
+		 * {
+		 * 	// Parse 'implicit handle class' construct
+		 * 	GetToken(&t);
+
+		 * 	if ( t.type == ttHandle )
+		 * 		node->SetToken(&t);
+		 * 	else
+		 * 		RewindTo(&t);
+		 * }
+		 */
+
+		node.AddChildLast(this.ParseIdentifier());
+
+		// External shared declarations are ended with ';'
+		t = this.GetToken();
+
+		if (t.type == eTokenType.ttEndStatement)
+		{
+			this.RewindTo(t);
+			node.AddChildLast(this.ParseToken(eTokenType.ttEndStatement));
+			return node;
+		}
+
+		// Optional list of interfaces that are being implemented and classes that are being inherited
+		if (t.type == eTokenType.ttColon)
+		{
+			let inherit = this.CreateNode(eScriptNode.snIdentifier);
+			node.AddChildLast(inherit);
+
+			this.ParseOptionalScope(inherit);
+			inherit.AddChildLast(this.ParseIdentifier());
+			t = this.GetToken();
+
+			while( t.type == eTokenType.ttListSeparator )
+			{
+				inherit = this.CreateNode(eScriptNode.snIdentifier);
+				node.AddChildLast(inherit);
+
+				this.ParseOptionalScope(inherit);
+				inherit.AddChildLast(this.ParseIdentifier());
+				t = this.GetToken();
+			}
+		}
+
+		if (t.type != eTokenType.ttStartStatementBlock)
+		{
+			this.Error(this.ExpectedToken("{"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		// Parse properties
+		t = this.GetToken();
+		this.RewindTo(t);
+
+		while (t.type != eTokenType.ttEndStatementBlock && t.type != eTokenType.ttEnd)
+		{
+			// Is it a property or a method?
+			if (t.type == eTokenType.ttFuncDef)
+				node.AddChildLast(this.ParseFuncDef());
+			else if(this.IsFuncDecl(true))
+				node.AddChildLast(this.ParseFunction(true));
+			else if(this.IsVirtualPropertyDecl())
+				node.AddChildLast(this.ParseVirtualPropertyDecl(true, false));
+			else if(this.IsVarDecl())
+				node.AddChildLast(this.ParseDeclaration(true));
+			else if(t.type == eTokenType.ttEndStatement)
+				// Skip empty declarations
+				t = this.GetToken();
+			else
+			{
+				this.Error(TXT_EXPECTED_METHOD_OR_PROPERTY, t);
+				this.Error(this.InsteadFound(t), t);
+				return node;
+			}
+
+			if(this.isSyntaxError)
+				return node;
+
+			t = this.GetToken();
+			this.RewindTo(t);
+		}
+
+		t = this.GetToken();
+
+		if(t.type != eTokenType.ttEndStatementBlock)
+		{
+			this.Error(this.ExpectedToken("}"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t.pos, t.length);
+
+		return node;
+	}
+
+	ParseMixin(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snMixin);
+
+		let t = this.GetToken();
+
+		if(t.type != eTokenType.ttMixin)
+		{
+			this.Error(this.ExpectedToken("mixin"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.SetToken(t);
+
+		// A mixin token must be followed by a class declaration
+		node.AddChildLast(this.ParseClass());
+
+		return node;
+	}
+
+	ParseInterface(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snInterface);
+
+		// Allow keywords 'external' and 'shared' before 'interface'
+		let t = this.GetToken();
+
+		while (this.IdentifierIs(t, SHARED_TOKEN)
+			|| this.IdentifierIs(t, EXTERNAL_TOKEN)
+		) {
+			this.RewindTo(t);
+			node.AddChildLast(this.ParseIdentifier());
+			if (this.isSyntaxError) return node;
+
+			t = this.GetToken();
+		}
+
+		if(t.type != eTokenType.ttInterface)
+		{
+			this.Error(this.ExpectedToken("interface"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.SetToken(t);
+		node.AddChildLast(this.ParseIdentifier());
+
+		// External shared declarations are ended with ';'
+		t = this.GetToken();
+		if (t.type == eTokenType.ttEndStatement)
+		{
+			this.RewindTo(t);
+			node.AddChildLast(this.ParseToken(eTokenType.ttEndStatement));
+			return node;
+		}
+
+		// Can optionally have a list of interfaces that are inherited
+		if(t.type == eTokenType.ttColon)
+		{
+			let inherit = this.CreateNode(eScriptNode.snIdentifier);
+			node.AddChildLast(inherit);
+
+			this.ParseOptionalScope(inherit);
+			inherit.AddChildLast(this.ParseIdentifier());
+			t = this.GetToken();
+
+			while (t.type == eTokenType.ttListSeparator)
+			{
+				inherit = this.CreateNode(eScriptNode.snIdentifier);
+				node.AddChildLast(inherit);
+
+				this.ParseOptionalScope(inherit);
+				inherit.AddChildLast(this.ParseIdentifier());
+				t = this.GetToken();
+			}
+		}
+
+		if(t.type != eTokenType.ttStartStatementBlock)
+		{
+			this.Error(this.ExpectedToken("{"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		// Parse interface methods
+		t = this.GetToken();
+		this.RewindTo(t);
+
+		while (t.type != eTokenType.ttEndStatementBlock && t.type != eTokenType.ttEnd)
+		{
+			if(this.IsVirtualPropertyDecl())
+				node.AddChildLast(this.ParseVirtualPropertyDecl(true, true));
+			else if(t.type == eTokenType.ttEndStatement)
+				// Skip empty declarations
+				t = this.GetToken();
+			else
+				// Parse the method signature
+				node.AddChildLast(this.ParseInterfaceMethod());
+
+			if(this.isSyntaxError) return node;
+
+			t = this.GetToken();
+			this.RewindTo(t);
+		}
+
+		t = this.GetToken();
+		if (t.type != eTokenType.ttEndStatementBlock)
+		{
+			this.Error(this.ExpectedToken("}"), t);
+			this.Error(this.InsteadFound(t), t);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t.pos, t.length);
+
+		return node;
+	}
+
+	ParseInterfaceMethod(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snFunction);
+
+		node.AddChildLast(this.ParseType(true));
+		if( this.isSyntaxError ) return node;
+
+		node.AddChildLast(this.ParseTypeMod(false));
+		if( this.isSyntaxError ) return node;
+
+		node.AddChildLast(this.ParseIdentifier());
+		if( this.isSyntaxError ) return node;
+
+		node.AddChildLast(this.ParseParameterList());
+		if( this.isSyntaxError ) return node;
+
+		// Parse an optional const after the method definition
+		let t1 = this.GetToken();
+		this.RewindTo(t1);
+		if( t1.type == eTokenType.ttConst )
+			node.AddChildLast(this.ParseToken(eTokenType.ttConst));
+
+		t1 = this.GetToken();
+		if( t1.type != eTokenType.ttEndStatement )
+		{
+			this.Error(this.ExpectedToken(";"), t1);
+			this.Error(this.InsteadFound(t1), t1);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t1.pos, t1.length);
+
+		return node;
+	}
+
+	ParseFuncDef(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snFuncDef);
+
+		// Allow keywords 'external' and 'shared' before 'interface'
+		let t1 = this.GetToken();
+
+		while (this.IdentifierIs(t1, SHARED_TOKEN) ||
+			   this.IdentifierIs(t1, EXTERNAL_TOKEN))
+		{
+			this.RewindTo(t1);
+			node.AddChildLast(this.ParseIdentifier());
+			if (this.isSyntaxError) return node;
+
+			t1 = this.GetToken();
+		}
+
+		if (t1.type != eTokenType.ttFuncDef)
+		{
+			this.Error(this.tokenizer.GetDefinition(eTokenType.ttFuncDef), t1);
+			return node;
+		}
+
+		node.SetToken(t1);
+		node.AddChildLast(this.ParseType(true));
+		if (this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseTypeMod(false));
+		if(this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseIdentifier());
+		if(this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseParameterList());
+		if(this.isSyntaxError) return node;
+
+		t1 = this.GetToken();
+		if( t1.type != eTokenType.ttEndStatement )
+		{
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(eTokenType.ttEndStatement)), t1);
+			this.Error(this.InsteadFound(t1), t1);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t1.pos, t1.length);
+
+		return node;
+	}
+
+	ParseVirtualPropertyDecl(isMethod: boolean, isInterface: boolean): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snVirtualProperty);
+
+		let t1 = this.GetToken();
+		/*let t2 = */this.GetToken();
+		this.RewindTo(t1);
+
+		// A class method can start with 'private' or 'protected'
+		if(isMethod && t1.type == eTokenType.ttPrivate)
+			node.AddChildLast(this.ParseToken(eTokenType.ttPrivate));
+		else if( isMethod && t1.type == eTokenType.ttProtected )
+			node.AddChildLast(this.ParseToken(eTokenType.ttProtected));
+		if(this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseType(true));
+		if(this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseTypeMod(false));
+		if(this.isSyntaxError) return node;
+
+		node.AddChildLast(this.ParseIdentifier());
+		if(this.isSyntaxError) return node;
+
+		t1 = this.GetToken();
+
+		if (t1.type != eTokenType.ttStartStatementBlock)
+		{
+			this.Error(this.ExpectedToken("{"), t1);
+			this.Error(this.InsteadFound(t1), t1);
+			return node;
+		}
+
+		for(;;)
+		{
+			t1 = this.GetToken();
+			 let accessorNode: ScriptNode = null;
+
+			if(this.IdentifierIs(t1, GET_TOKEN) || this.IdentifierIs(t1, SET_TOKEN))
+			{
+				accessorNode = this.CreateNode(eScriptNode.snVirtualProperty);
+
+				node.AddChildLast(accessorNode);
+
+				this.RewindTo(t1);
+				accessorNode.AddChildLast(this.ParseIdentifier());
+
+				if (isMethod)
+				{
+					t1 = this.GetToken();
+					this.RewindTo(t1);
+
+					if (t1.type == eTokenType.ttConst)
+						accessorNode.AddChildLast(this.ParseToken(eTokenType.ttConst));
+
+					if (!isInterface)
+					{
+						this.ParseMethodAttributes(accessorNode);
+						if (this.isSyntaxError) return node;
+					}
+				}
+
+				if (!isInterface)
+				{
+					t1 = this.GetToken();
+					if (t1.type == eTokenType.ttStartStatementBlock)
+					{
+						this.RewindTo(t1);
+						accessorNode.AddChildLast(this.SuperficiallyParseStatementBlock());
+						if (this.isSyntaxError) return node;
+					}
+					else if (t1.type != eTokenType.ttEndStatement)
+					{
+						this.Error(this.ExpectedTokens(";", "{"), t1);
+						this.Error(this.InsteadFound(t1), t1);
+						return node;
+					}
+				}
+				else
+				{
+					t1 = this.GetToken();
+					if (t1.type != eTokenType.ttEndStatement)
+					{
+						this.Error(this.ExpectedToken(";"), t1);
+						this.Error(this.InsteadFound(t1), t1);
+						return node;
+					}
+				}
+			}
+			else if (t1.type == eTokenType.ttEndStatementBlock)
+				break;
+			else
+			{
+				const tokens: string[] = [GET_TOKEN, SET_TOKEN, this.tokenizer.GetDefinition(eTokenType.ttEndStatementBlock)];
+				this.Error(this.ExpectedOneOf(tokens), t1);
+				this.Error(this.InsteadFound(t1), t1);
+				return node;
+			}
+		}
+
+		return node;
+	}
 
     ParseFunction(isMethod: boolean = false): ScriptNode
     {
@@ -229,7 +1072,7 @@ export class Parser
         return node;
     }
 
-    ParseMethodAttributes(funcNode: ScriptNode)
+    ParseMethodAttributes(funcNode: ScriptNode): void
     {
         let t1;
 
@@ -248,6 +1091,131 @@ export class Parser
         }
     }
 
+	SuperficiallyParseVarInit(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snAssignment);
+
+		let t = this.GetToken();
+		node.UpdateSourcePosition(t.pos, t.length);
+
+		if (t.type == eTokenType.ttAssignment)
+		{
+			t = this.GetToken();
+
+			const start = t;
+
+			// Find the end of the expression
+			let indentParan = 0;
+			let indentBrace = 0;
+
+			while( indentParan || indentBrace || (t.type != eTokenType.ttListSeparator && t.type != eTokenType.ttEndStatement && t.type != eTokenType.ttEndStatementBlock) )
+			{
+				if( t.type == eTokenType.ttOpenParanthesis )
+					indentParan++;
+				else if( t.type == eTokenType.ttCloseParanthesis )
+					indentParan--;
+				else if( t.type == eTokenType.ttStartStatementBlock )
+					indentBrace++;
+				else if( t.type == eTokenType.ttEndStatementBlock )
+					indentBrace--;
+				else if( t.type == eTokenType.ttNonTerminatedStringConstant )
+				{
+					this.Error(TXT_NONTERMINATED_STRING, t);
+					break;
+				}
+				else if( t.type == eTokenType.ttEnd )
+				{
+					this.Error(TXT_UNEXPECTED_END_OF_FILE, t);
+					this.Info(TXT_WHILE_PARSING_EXPRESSION, start);
+					break;
+				}
+				t = this.GetToken();
+			}
+
+			// Rewind so that the next token read is the list separator, end statement, or end statement block
+			this.RewindTo(t);
+		}
+		else if( t.type == eTokenType.ttOpenParanthesis )
+		{
+			const start = t;
+
+			// Find the end of the argument list
+			let indent = 1;
+
+			while (indent)
+			{
+				t = this.GetToken();
+				if (t.type == eTokenType.ttOpenParanthesis)
+					indent++;
+				else if(t.type == eTokenType.ttCloseParanthesis)
+					indent--;
+				else if(t.type == eTokenType.ttNonTerminatedStringConstant)
+				{
+					this.Error(TXT_NONTERMINATED_STRING, t);
+					break;
+				}
+				else if(t.type == eTokenType.ttEnd)
+				{
+					this.Error(TXT_UNEXPECTED_END_OF_FILE, t);
+					this.Info(TXT_WHILE_PARSING_ARG_LIST, start);
+					break;
+				}
+			}
+		}
+		else
+		{
+			const tokens = [eTokenType.ttAssignment, eTokenType.ttOpenParanthesis];
+			this.Error(this.ExpectedOneOf(tokens), t);
+			this.Error(this.InsteadFound(t), t);
+		}
+
+		return node;
+	}
+
+	SuperficiallyParseStatementBlock(): ScriptNode
+	{
+		const node = this.CreateNode(eScriptNode.snStatementBlock);
+
+		// This function will only superficially parse the statement block in order to find the end of it
+		let t1 = this.GetToken();
+		if(t1.type != eTokenType.ttStartStatementBlock)
+		{
+			this.Error(this.ExpectedToken("{"), t1);
+			this.Error(this.InsteadFound(t1), t1);
+			return node;
+		}
+
+		node.UpdateSourcePosition(t1.pos, t1.length);
+
+		const start = t1;
+
+		let level = 1;
+
+		while( level > 0 && !this.isSyntaxError )
+		{
+			t1 = this.GetToken();
+			if( t1.type == eTokenType.ttEndStatementBlock )
+				level--;
+			else if( t1.type == eTokenType.ttStartStatementBlock )
+				level++;
+			else if( t1.type == eTokenType.ttNonTerminatedStringConstant )
+			{
+				this.Error(TXT_NONTERMINATED_STRING, t1);
+				break;
+			}
+			else if( t1.type == eTokenType.ttEnd )
+			{
+				this.Error(TXT_UNEXPECTED_END_OF_FILE, t1);
+				this.Info(TXT_WHILE_PARSING_STATEMENT_BLOCK, start);
+				break;
+			}
+		}
+
+		node.UpdateSourcePosition(t1.pos, t1.length);
+
+		return node;
+	}
+
     ParseStatementBlock(): ScriptNode
     {
         let node = this.CreateNode(eScriptNode.snStatementBlock);
@@ -256,9 +1224,12 @@ export class Parser
 
         if (t1.type != eTokenType.ttStartStatementBlock)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("{"), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
+
+        let start = t1;
 
         node.UpdateSourcePosition(t1.pos, t1.length);
 
@@ -314,7 +1285,8 @@ export class Parser
                 }
                 else if (t1.type == eTokenType.ttEnd)
                 {
-                    this.Error();
+					this.Error(TXT_UNEXPECTED_END_OF_FILE, t1);
+					this.Info(TXT_WHILE_PARSING_STATEMENT_BLOCK, start);
                     return node;
                 }
 
@@ -352,7 +1324,7 @@ export class Parser
         {
             if (this.IsVarDecl())
             {
-                this.Error();
+				this.Error(TXT_UNEXPECTED_VAR_DECL, t1);
             }
             return this.ParseExpressionStatement();
         }
@@ -366,7 +1338,8 @@ export class Parser
 
         if (t.type != eTokenType.ttIf)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("if"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -375,7 +1348,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -384,10 +1358,10 @@ export class Parser
 
         t = this.GetToken();
 
-        console.log(PrintToken(t, this.tokenizer.source.source));
         if (t.type != eTokenType.ttCloseParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(")"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -414,7 +1388,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttFor)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("for"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -423,7 +1398,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -456,8 +1432,10 @@ export class Parser
                     break;
                 else
                 {
-                    this.Error();
-                    return node;
+					const tokens = [",", ")"];
+					this.Error(this.ExpectedOneOf(tokens), t);
+					this.Error(this.InsteadFound(t), t);
+					return node;
                 }
             }
         }
@@ -474,7 +1452,8 @@ export class Parser
 
         if (t.type != eTokenType.ttWhile)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("while"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -483,7 +1462,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -493,7 +1473,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttCloseParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(")"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -509,7 +1490,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttReturn)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("return"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -530,7 +1512,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttEndStatement)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(";"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -543,9 +1526,11 @@ export class Parser
     {
         let node = this.CreateNode(eScriptNode.snBreak);
         let t = this.GetToken();
+
         if (t.type != eTokenType.ttBreak)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("break"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -554,7 +1539,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttEndStatement)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(";"), t);
+			this.Error(this.InsteadFound(t), t);
         }
 
         node.UpdateSourcePosition(t.pos, t.length);
@@ -569,7 +1555,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttContinue)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("continue"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -578,7 +1565,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttEndStatement)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(";"), t);
+			this.Error(this.InsteadFound(t), t);
         }
 
         node.UpdateSourcePosition(t.pos, t.length);
@@ -593,7 +1581,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttDo)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("do"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -605,14 +1594,16 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttWhile)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("while"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
         t = this.GetToken();
         if (t.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -622,14 +1613,16 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttCloseParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(")"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
         t = this.GetToken();
         if (t.type != eTokenType.ttEndStatement)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(";"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -645,7 +1638,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttSwitch)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("switch"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -654,7 +1648,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -664,14 +1659,16 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttCloseParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(")"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
         t = this.GetToken();
         if (t.type != eTokenType.ttStartStatementBlock)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("{"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -686,7 +1683,9 @@ export class Parser
 
             if (t.type != eTokenType.ttCase && t.type != eTokenType.ttDefault)
             {
-                this.Error();
+				const tokens = ["case", "default"];
+				this.Error(this.ExpectedOneOf(tokens), t);
+				this.Error(this.InsteadFound(t), t);
                 return node;
             }
 
@@ -696,7 +1695,8 @@ export class Parser
 
         if (t.type != eTokenType.ttEndStatementBlock)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("}"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -711,7 +1711,8 @@ export class Parser
 
         if (t.type != eTokenType.ttCase && t.type != eTokenType.ttDefault)
         {
-            this.Error();
+			this.Error(this.ExpectedTokens("case", "default"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -725,7 +1726,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttColon)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(":"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -762,7 +1764,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttTry)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("try"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -774,7 +1777,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttCatch)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("catch"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -858,7 +1862,8 @@ export class Parser
             }
             else
             {
-                this.Error();
+				this.Error(this.ExpectedTokens(",", ";"), t);
+				this.Error(this.InsteadFound(t), t);
                 return node;
             }
         }
@@ -871,7 +1876,8 @@ export class Parser
         let t1 = this.GetToken();
         if (t1.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
@@ -948,7 +1954,8 @@ export class Parser
                 }
                 else
                 {
-                    this.Error();
+					this.Error(this.ExpectedTokens(")", ","), t1);
+					this.Error(this.InsteadFound(t1), t1);
                     return node;
                 }
             }
@@ -962,7 +1969,8 @@ export class Parser
         let t1 = this.GetToken();
         if (t1.type != eTokenType.ttStartStatementBlock)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("{"), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
@@ -1028,7 +2036,8 @@ export class Parser
                     }
                     else
                     {
-                        this.Error();
+						this.Error(this.ExpectedTokens("}", ","), t1);
+						this.Error(this.InsteadFound(t1), t1);
                         return node;
                     }
                 }
@@ -1050,7 +2059,8 @@ export class Parser
                     }
                     else
                     {
-                        this.Error();
+						this.Error(this.ExpectedTokens("}", ","), t1);
+						this.Error(this.InsteadFound(t1), t1);
                         return node;
                     }
                 }
@@ -1067,8 +2077,6 @@ export class Parser
 
         let t = this.GetToken();
         this.RewindTo(t);
-
-        PrintToken(t, this.tokenizer.source.source);
 
         if (this.IsAssignOperator(t.type))
         {
@@ -1098,7 +2106,8 @@ export class Parser
             t = this.GetToken();
             if (t.type != eTokenType.ttColon)
             {
-                this.Error();
+				this.Error(this.ExpectedToken(":"), t);
+				this.Error(this.InsteadFound(t), t);
                 return node;
             }
 
@@ -1131,7 +2140,8 @@ export class Parser
         t = this.GetToken();
         if (t.type != eTokenType.ttEndStatement)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(";"), t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1250,7 +2260,8 @@ export class Parser
         let t = this.GetToken();
         if (!this.IsPreOperator(t.type))
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_PRE_OPERATOR, t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1266,7 +2277,8 @@ export class Parser
         let t = this.GetToken();
         if (!this.IsPostOperator(t.type))
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_POST_OPERATOR, t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1290,7 +2302,8 @@ export class Parser
             t = this.GetToken();
             if (t.type != eTokenType.ttCloseBracket)
             {
-                this.Error();
+				this.Error(this.ExpectedToken("]"), t);
+				this.Error(this.InsteadFound(t), t);
                 return node;
             }
 
@@ -1385,14 +2398,16 @@ export class Parser
             t1 = this.GetToken();
             if (t1.type != eTokenType.ttCloseParanthesis)
             {
-                this.Error();
+				this.Error(this.ExpectedToken(")"), t1);
+				this.Error(this.InsteadFound(t1), t1);
             }
 
             node.UpdateSourcePosition(t1.pos, t1.length);
         }
         else
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_EXPRESSION_VALUE, t1);
+			this.Error(this.InsteadFound(t1), t1);
         }
 
         return node;
@@ -1405,7 +2420,8 @@ export class Parser
         let t1 = this.GetToken();
         if (t1.type != eTokenType.ttCast)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("cast"), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
@@ -1414,7 +2430,8 @@ export class Parser
         t1 = this.GetToken();
         if (t1.type != eTokenType.ttLessThan)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("<"), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
@@ -1425,14 +2442,16 @@ export class Parser
         t1 = this.GetToken();
         if (t1.type != eTokenType.ttGreaterThan)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(">"), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
         t1 = this.GetToken();
         if (t1.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
@@ -1442,7 +2461,8 @@ export class Parser
         t1 = this.GetToken();
         if (t1.type != eTokenType.ttCloseParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(")"), t1);
+			this.Error(this.InsteadFound(t1), t1);
             return node;
         }
 
@@ -1459,14 +2479,14 @@ export class Parser
 
         if (t.type != eTokenType.ttIdentifier || !this.IdentifierIs(t, FUNCTION_TOKEN))
         {
-            this.Error();
+			this.Error(this.ExpectedToken("function"), t);
             return node;
         }
 
         t = this.GetToken();
         if (t.type != eTokenType.ttOpenParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken("("), t);
             return node;
         }
 
@@ -1521,7 +2541,7 @@ export class Parser
 
         if (t.type != eTokenType.ttCloseParanthesis)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(")"), t);
             return node;
         }
 
@@ -1570,7 +2590,8 @@ export class Parser
             t1 = this.GetToken();
             if (t1.type != eTokenType.ttOpenParanthesis)
             {
-                this.Error();
+				this.Error(this.ExpectedToken("("), t1);
+				this.Error(this.InsteadFound(t1), t1);
                 return node;
             }
 
@@ -1586,7 +2607,7 @@ export class Parser
                     node.UpdateSourcePosition(t1.pos, t1.length);
                 else
                 {
-                    this.Error();
+					this.Error(TXT_UNEXPECTED_TOKEN_s.Format(this.tokenizer.GetDefinition(eTokenType.ttCloseBracket)), t1);
                 }
             }
             else
@@ -1638,7 +2659,8 @@ export class Parser
                             node.UpdateSourcePosition(t1.pos, t1.length);
                         else
                         {
-                            this.Error();
+							this.Error(this.ExpectedTokens(")", ","), t1);
+							this.Error(this.InsteadFound(t1), t1);
                         }
                     }
                     else
@@ -1714,7 +2736,8 @@ export class Parser
                 token = this.GetToken();
                 if (token.type != eTokenType.ttCloseBracket)
                 {
-                    this.Error();
+					this.Error(this.ExpectedToken("]"), token);
+					this.Error(this.InsteadFound(token), token);
                     return node;
                 }
             }
@@ -1746,7 +2769,8 @@ export class Parser
         let t = this.GetToken();
         if (!this.IsConstant(t.type))
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_CONSTANT, t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1774,7 +2798,8 @@ export class Parser
         let t = this.GetToken();
         if (t.type != eTokenType.ttStringConstant && t.type != eTokenType.ttMultilineStringConstant && t.type != eTokenType.ttHeredocStringConstant)
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_CONSTANT, t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1871,15 +2896,16 @@ export class Parser
         {
             if (token.type == eTokenType.ttIdentifier)
             {
-                this.Error();
+                this.Error(TXT_IDENTIFIER_s_NOT_DATA_TYPE.Format(this.tokenizer.source.source.substr(token.pos, token.length)), token);
             }
             else if (token.type == eTokenType.ttAuto)
             {
-                this.Error();
+				this.Error(TXT_AUTO_NOT_ALLOWED, token);
             }
             else
             {
-                this.Error();
+				this.Error(TXT_EXPECTED_DATA_TYPE, token);
+				this.Error(this.InsteadFound(token), token);
             }
 
             return node;
@@ -1933,7 +2959,7 @@ export class Parser
             if (this.isSyntaxError) return node;
         }
 
-        return null;
+        return node;
     }
 
     ParseExprOperator(): ScriptNode
@@ -1943,7 +2969,8 @@ export class Parser
         let t = this.GetToken();
         if (!this.IsOperator(t.type))
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_OPERATOR, t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1958,7 +2985,8 @@ export class Parser
         let t = this.GetToken();
         if (!this.IsAssignOperator(t.type))
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_OPERATOR, t);
+			this.Error(this.InsteadFound(t), t);
             return node;
         }
 
@@ -1973,7 +3001,8 @@ export class Parser
         let token = this.GetToken();
         if (token.type != eTokenType.ttIdentifier)
         {
-            this.Error();
+			this.Error(TXT_EXPECTED_IDENTIFIER, token);
+			this.Error(this.InsteadFound(token), token);
             return node;
         }
 
@@ -1988,7 +3017,8 @@ export class Parser
         let token = this.GetToken();
         if (token.type != tokenType)
         {
-            this.Error();
+			this.Error(this.ExpectedToken(this.tokenizer.GetDefinition(token.type)), token);
+			this.Error(this.InsteadFound(token), token);
             return node;
         }
 
@@ -2013,7 +3043,8 @@ export class Parser
 
         if (n == tokens.length)
         {
-            this.Error();
+			this.Error(this.ExpectedOneOf(tokens), token);
+			this.Error(this.InsteadFound(token), token);
             return node;
         }
 
@@ -2053,6 +3084,117 @@ export class Parser
 
         return false;
     }
+
+	IsFuncDecl(isMethod: boolean): boolean
+	{
+		// Set start point so that we can rewind
+		let t = this.GetToken();
+		this.RewindTo(t);
+
+		if (isMethod)
+		{
+			// A class method decl can be preceded by 'private' or 'protected'
+			let t1 = this.GetToken();
+			let t2;
+			if (t1.type != eTokenType.ttPrivate && t1.type != eTokenType.ttProtected)
+				this.RewindTo(t1);
+
+			// A class constructor starts with identifier followed by parenthesis
+			// A class destructor starts with the ~ token
+			t1 = this.GetToken();
+			t2 = this.GetToken();
+			this.RewindTo(t1);
+			if( (t1.type == eTokenType.ttIdentifier && t2.type == eTokenType.ttOpenParanthesis) || t1.type == eTokenType.ttBitNot )
+			{
+				this.RewindTo(t);
+				return true;
+			}
+		}
+
+		let isTypeResult = this.IsType();
+		let t1 = isTypeResult[1];
+		// A function decl starts with a type
+		if (!isTypeResult[0])
+		{
+			this.RewindTo(t);
+			return false;
+		}
+
+		// Move to the token after the type
+		this.RewindTo(t1);
+		t1 = this.GetToken();
+
+		// There can be an ampersand if the function returns a reference
+		if(t1.type == eTokenType.ttAmp)
+		{
+			this.RewindTo(t);
+			return true;
+		}
+
+		if(t1.type != eTokenType.ttIdentifier)
+		{
+			this.RewindTo(t);
+			return false;
+		}
+
+		t1 = this.GetToken();
+		if (t1.type == eTokenType.ttOpenParanthesis)
+		{
+			// If the closing parenthesis is not followed by a
+			// statement block then it is not a function.
+			// It's possible that there are nested parenthesis due to default
+			// arguments so this should be checked for.
+			let nest = 0;
+			t1 = this.GetToken();
+			while((nest || t1.type != eTokenType.ttCloseParanthesis) && t1.type != eTokenType.ttEnd)
+			{
+				if( t1.type == eTokenType.ttOpenParanthesis)
+					nest++;
+				if( t1.type == eTokenType.ttCloseParanthesis)
+					nest--;
+
+				t1 = this.GetToken();
+			}
+
+			if (t1.type == eTokenType.ttEnd)
+				return false;
+			else
+			{
+				if( isMethod )
+				{
+					// A class method can have a 'const' token after the parameter list
+					t1 = this.GetToken();
+					if (t1.type != eTokenType.ttConst)
+						this.RewindTo(t1);
+				}
+
+				// A function may also have any number of additional attributes
+				for( ; ; )
+				{
+					t1 = this.GetToken();
+					if (!this.IdentifierIs(t1, FINAL_TOKEN)
+						&& !this.IdentifierIs(t1, OVERRIDE_TOKEN)
+						&& !this.IdentifierIs(t1, EXPLICIT_TOKEN)
+						&& !this.IdentifierIs(t1, PROPERTY_TOKEN)
+					) {
+						this.RewindTo(t1);
+						break;
+					}
+				}
+				
+				t1 = this.GetToken();
+				this.RewindTo(t);
+				if (t1.type == eTokenType.ttStartStatementBlock)
+					return true;
+			}
+
+			this.RewindTo(t);
+			return false;
+		}
+
+		this.RewindTo(t);
+		return false;
+	}
 
     IsVarDecl(): boolean
     {
@@ -2144,6 +3286,47 @@ export class Parser
         this.RewindTo(t);
         return false;
     }
+
+	IsVirtualPropertyDecl(): boolean
+	{
+		// Set start point so that we can rewind
+		const t = this.GetToken();
+		this.RewindTo(t);
+
+		// A class property decl can be preceded by 'private' or 'protected'
+		let t1 = this.GetToken();
+		if( t1.type != eTokenType.ttPrivate && t1.type != eTokenType.ttProtected )
+			this.RewindTo(t1);
+
+		// A variable decl starts with the type
+		if (!this.IsType())
+		{
+			this.RewindTo(t);
+			return false;
+		}
+
+		// Move to the token after the type
+		this.RewindTo(t1);
+		t1 = this.GetToken();
+
+		// The decl must have an identifier
+		if( t1.type != eTokenType.ttIdentifier )
+		{
+			this.RewindTo(t);
+			return false;
+		}
+
+		// To be a virtual property it must also have a block for the get/set functions
+		t1 = this.GetToken();
+		if( t1.type == eTokenType.ttStartStatementBlock )
+		{
+			this.RewindTo(t);
+			return true;
+		}
+
+		this.RewindTo(t);
+		return false;
+	}
 
     // nextToken is only modified if the current position can be interpreted as
     // type, in this case it is set to the next token after the type tokens
@@ -2428,9 +3611,9 @@ export class Parser
 	}
 
 	Error(text: string, token: Token)
-    {
+	{
 		this.RewindTo(token);
-        this.isSyntaxError = true;
+		this.isSyntaxError = true;
 
         this.errors.push(
             new asError(
@@ -2469,6 +3652,6 @@ export class Parser
 			return TXT_INSTEAD_FOUND_KEYWORD_s.Format(this.tokenizer.GetDefinition(t.type));
 		else
 			return TXT_INSTEAD_FOUND_s.Format(this.tokenizer.GetDefinition(t.type));
-    }
+	}
 
 }
