@@ -2,16 +2,37 @@ import { eScriptNode, ScriptNode } from "./scriptnode";
 import { Tokenizer } from "./tokenizer";
 import { eTokenType, EXPLICIT_TOKEN, EXTERNAL_TOKEN, FINAL_TOKEN, FUNCTION_TOKEN, IF_HANDLE_TOKEN, OVERRIDE_TOKEN, PrintToken, PROPERTY_TOKEN, SHARED_TOKEN, Token } from "./tokens";
 
+export abstract class asProblem extends Error {
+    constructor(
+        public readonly str: string,
+        public readonly token: Token,
+    ) {
+        super(str);
+    }
+}
+
+export class asError extends asProblem { }
+export class asWarning extends asProblem { }
+export class asInfo extends asProblem { }
+
 export class Parser
 {
-    tokenizer: Tokenizer;
-    isSyntaxError = false;
-    root: ScriptNode;
+    private readonly tokenizer: Tokenizer;
+    private isSyntaxError = false;
+    private readonly root: ScriptNode;
+
+    // logs
+    public readonly infos: asInfo[];
+    public readonly warnings: asWarning[];
+    public readonly errors: asError[];
 
     constructor(source: string)
     {
         this.tokenizer = new Tokenizer(source);
         this.root = this.CreateNode(eScriptNode.snScript);
+        this.infos = [];
+        this.warnings = [];
+        this.errors = [];
     }
 
     GetRootNode() : ScriptNode
