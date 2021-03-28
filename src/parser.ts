@@ -2,61 +2,6 @@ import { eScriptNode, ScriptNode } from "./scriptnode";
 import { Tokenizer } from "./tokenizer";
 import { eTokenType, EXPLICIT_TOKEN, EXTERNAL_TOKEN, FINAL_TOKEN, FUNCTION_TOKEN, IF_HANDLE_TOKEN, OVERRIDE_TOKEN, PrintToken, PROPERTY_TOKEN, SHARED_TOKEN, Token } from "./tokens";
 
-var objIdMap=new WeakMap, objectCount = 0;
-function objectId(object: ScriptNode){
-  if (!objIdMap.has(object)) objIdMap.set(object,++objectCount);
-  return objIdMap.get(object) + "";
-}
-interface node {
-    id: string
-    label: string
-}
-
-interface edges {
-    from: string,
-    to: string,
-}
-
-function PrintTree(tree: ScriptNode)
-{
-    let queue = [];
-
-    queue.push(tree);
-
-    let nodes: node[] = [];
-    let edges: edges[] = [];
-
-    while(queue.length > 0)
-    {
-        let elem = queue.shift();
-
-        if (!elem)
-        {
-            break;
-        }
-        
-        nodes.push({id: objectId(elem), label: eScriptNode[elem.nodeType]});
-
-        for(let child: ScriptNode | null | undefined = elem.firstChild; child; child = child.next)
-        {
-            edges.push({from: objectId(elem), to: objectId(child)})
-            if (child as ScriptNode)
-            {
-                queue.push(child);
-            }
-        }
-    }
-
-    return {
-        "kind": { "graph": true },
-        "nodes": nodes,
-        "edges": edges,
-    }
-}
-
-const _global = globalThis as any;
-_global.PrintTree = PrintTree;
-
 export class Parser
 {
     tokenizer: Tokenizer;
