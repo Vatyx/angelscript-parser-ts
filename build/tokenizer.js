@@ -62,6 +62,10 @@ class Tokenizer {
         this.lastToken = token;
         this.source.SetStart(token.pos);
     }
+    SetPosition(position) {
+        this.lastToken = null;
+        this.source.SetStart(position);
+    }
     IdentifierIs(token, identifier) {
         if (token.type != tokens_1.eTokenType.ttIdentifier) {
             return false;

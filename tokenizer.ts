@@ -99,6 +99,12 @@ export class Tokenizer
         this.source.SetStart(token.pos);
     }
 
+    SetPosition(position: number)
+    {
+        this.lastToken = null;
+        this.source.SetStart(position);
+    }
+
     IdentifierIs(token: Token, identifier: string): boolean
     {
         if (token.type != eTokenType.ttIdentifier)

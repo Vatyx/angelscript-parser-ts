@@ -39,76 +39,673 @@ _global.PrintTree = PrintTree;
 class Parser {
     constructor(source) {
         this.isSyntaxError = false;
+        this.checkValidTypes = false;
         this.GetToken = () => this.tokenizer.ConsumeToken();
         this.RewindTo = (token) => this.tokenizer.RewindToToken(token);
         this.IdentifierIs = (token, identifier) => this.tokenizer.IdentifierIs(token, identifier);
         this.tokenizer = new tokenizer_1.Tokenizer(source);
-        this.root = this.CreateNode(scriptnode_1.eScriptNode.snScript);
     }
-    GetRootNode() {
-        return this.root;
+    DoParseScript() {
+        return this.ParseScript(false);
     }
-    ParseScript() {
-        let node = this.root;
+    ParseScript(inBlock) {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snScript);
         while (true) {
             while (!this.isSyntaxError) {
                 let token = this.GetToken();
-                if (token.type == tokens_1.eTokenType.ttEnd) {
-                    return node;
+                let t1 = token;
+                // Optimize by skipping tokens 'shared', 'external', 'final', 'abstract' so they don't have to be checked in every condition
+                while (this.IdentifierIs(t1, tokens_1.SHARED_TOKEN) || this.IdentifierIs(t1, tokens_1.EXTERNAL_TOKEN) || this.IdentifierIs(t1, tokens_1.FINAL_TOKEN) || this.IdentifierIs(t1, tokens_1.ABSTRACT_TOKEN)) {
+                    t1 = this.GetToken();
                 }
                 this.RewindTo(token);
                 if (token.type == tokens_1.eTokenType.ttImport) {
+                    node.AddChildLast(this.ParseImport());
                 }
-                if (token.type == tokens_1.eTokenType.ttConst || token.type == tokens_1.eTokenType.ttScope || token.type == tokens_1.eTokenType.ttAuto || this.IsDataType(token)) {
-                    node.AddChildLast(this.ParseFunction());
+                else if (token.type == tokens_1.eTokenType.ttEnum) {
+                    node.AddChildLast(this.ParseEnumeration());
                 }
-                // if( t1.type == ttImport )
-                //     node->AddChildLast(ParseImport());
-                // else if( t1.type == ttEnum )
-                //     node->AddChildLast(ParseEnumeration());	// Handle enumerations
-                // else if( t1.type == ttTypedef )
-                //     node->AddChildLast(ParseTypedef());		// Handle primitive typedefs
-                // else if( t1.type == ttClass )
-                //     node->AddChildLast(ParseClass());
-                // else if( t1.type == ttMixin )
-                //     node->AddChildLast(ParseMixin());
-                // else if( t1.type == ttInterface )
-                //     node->AddChildLast(ParseInterface());
-                // else if( t1.type == ttFuncDef )
-                //     node->AddChildLast(ParseFuncDef());
-                // else if( t1.type == ttConst || t1.type == ttScope || t1.type == ttAuto || IsDataType(t1) )
-                // {
-                //     if( IsVirtualPropertyDecl() )
-                //         node->AddChildLast(ParseVirtualPropertyDecl(false, false));
-                //     else if( IsVarDecl() )
-                //         node->AddChildLast(ParseDeclaration(false, true));
-                //     else
-                //         node->AddChildLast(ParseFunction());
-                // }
-                // else if( t1.type == ttEndStatement )
-                // {
-                //     // Ignore a semicolon by itself
-                //     GetToken(&t1);
-                // }
-                // else if( t1.type == ttNamespace )
-                //     node->AddChildLast(ParseNamespace());
-                // else if( t1.type == ttEnd )
-                //     return node;
-                // else if( inBlock && t1.type == ttEndStatementBlock )
-                //     return node;
-                // else
-                // {
-                //     asCString str;
-                //     const char *t = asCTokenizer::GetDefinition(t1.type);
-                //     if( t == 0 ) t = "<unknown token>";
-                //     str.Format(TXT_UNEXPECTED_TOKEN_s, t);
-                //     Error(str, &t1);
-                // }
+                else if (token.type == tokens_1.eTokenType.ttTypedef) {
+                    node.AddChildLast(this.ParseTypedef());
+                }
+                else if (token.type == tokens_1.eTokenType.ttClass) {
+                    node.AddChildLast(this.ParseClass());
+                }
+                else if (token.type == tokens_1.eTokenType.ttMixin) {
+                }
+                else if (token.type == tokens_1.eTokenType.ttInterface) {
+                }
+                else if (token.type == tokens_1.eTokenType.ttFuncDef) {
+                    node.AddChildLast(this.ParseFuncDef());
+                }
+                else if (token.type == tokens_1.eTokenType.ttConst || token.type == tokens_1.eTokenType.ttScope || token.type == tokens_1.eTokenType.ttAuto || this.IsDataType(token)) {
+                    if (this.IsVirtualPropertyDecl()) {
+                        node.AddChildLast(this.ParseVirtualPropertyDecl(false, false));
+                    }
+                    else if (this.IsVarDecl()) {
+                        node.AddChildLast(this.ParseDeclaration(false, true));
+                    }
+                    else {
+                        node.AddChildLast(this.ParseFunction());
+                    }
+                }
+                else if (token.type == tokens_1.eTokenType.ttEndStatement) {
+                    // Ignore a semicolon by itself
+                    token = this.GetToken();
+                }
+                else if (token.type == tokens_1.eTokenType.ttNamespace) {
+                    node.AddChildLast(this.ParseNamespace());
+                }
+                else if (token.type == tokens_1.eTokenType.ttEnd) {
+                    return node;
+                }
+                else if (inBlock && token.type == tokens_1.eTokenType.ttEndStatementBlock) {
+                    return node;
+                }
+                else {
+                    this.Error();
+                }
+            }
+            if (this.isSyntaxError) {
+                // Search for either ';' or '{' or end
+                let t1 = this.GetToken();
+                while (t1.type != tokens_1.eTokenType.ttEndStatement && t1.type != tokens_1.eTokenType.ttEnd && t1.type != tokens_1.eTokenType.ttStartStatementBlock) {
+                    t1 = this.GetToken();
+                }
+                if (t1.type == tokens_1.eTokenType.ttStartStatementBlock) {
+                    // Find the end of the block and skip nested blocks
+                    let level = 1;
+                    while (level > 0) {
+                        t1 = this.GetToken();
+                        if (t1.type == tokens_1.eTokenType.ttStartStatementBlock)
+                            level++;
+                        if (t1.type == tokens_1.eTokenType.ttEndStatementBlock)
+                            level--;
+                        if (t1.type == tokens_1.eTokenType.ttEnd)
+                            break;
+                    }
+                }
+                this.isSyntaxError = false;
             }
         }
     }
     CreateNode(type) {
         return new scriptnode_1.ScriptNode(type);
+    }
+    ParseImport() {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snImport);
+        let t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttImport) {
+            this.Error();
+            return node;
+        }
+        node.SetToken(t);
+        node.AddChildLast(this.ParseFunctionDefinition());
+        if (this.isSyntaxError)
+            return node;
+        t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttIdentifier) {
+            this.Error();
+            return node;
+        }
+        let str = this.tokenizer.source.source.substr(t.pos, t.length);
+        if (str != tokens_1.FROM_TOKEN) {
+            this.Error();
+            return node;
+        }
+        node.UpdateSourcePosition(t.pos, t.length);
+        t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttStringConstant) {
+            this.Error();
+            return node;
+        }
+        let mod = this.CreateNode(scriptnode_1.eScriptNode.snConstant);
+        node.AddChildLast(mod);
+        mod.SetToken(t);
+        t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttEndStatement) {
+            this.Error();
+            return node;
+        }
+        node.UpdateSourcePosition(t.pos, t.length);
+        return node;
+    }
+    ParseFunctionDefinition() {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snFunction);
+        node.AddChildLast(this.ParseType(true));
+        if (this.isSyntaxError)
+            return node;
+        let typeModResult = this.ParseTypeMod(false);
+        if (typeModResult != null) {
+            node.AddChildLast(typeModResult);
+        }
+        if (this.isSyntaxError)
+            return node;
+        this.ParseOptionalScope(node);
+        node.AddChildLast(this.ParseIdentifier());
+        if (this.isSyntaxError)
+            return node;
+        node.AddChildLast(this.ParseParameterList());
+        if (this.isSyntaxError)
+            return node;
+        // Parse an optional 'const' after the function definition (used for object methods)
+        let t1 = this.GetToken();
+        this.RewindTo(t1);
+        if (t1.type == tokens_1.eTokenType.ttConst)
+            node.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttConst));
+        // Parse optional attributes
+        this.ParseMethodAttributes(node);
+        return node;
+    }
+    ParseEnumeration() {
+        // asCScriptNode *ident;
+        // asCScriptNode *dataType;
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snEnum);
+        // Optional 'shared' and 'external' token
+        let token = this.GetToken();
+        while (this.IdentifierIs(token, tokens_1.SHARED_TOKEN) ||
+            this.IdentifierIs(token, tokens_1.EXTERNAL_TOKEN)) {
+            this.RewindTo(token);
+            node.AddChildLast(this.ParseIdentifier());
+            if (this.isSyntaxError)
+                return node;
+            token = this.GetToken();
+        }
+        // Check for enum
+        if (token.type != tokens_1.eTokenType.ttEnum) {
+            this.Error();
+            return node;
+        }
+        node.SetToken(token);
+        node.UpdateSourcePosition(token.pos, token.length);
+        // Get the identifier
+        token = this.GetToken();
+        if (tokens_1.eTokenType.ttIdentifier != token.type) {
+            this.Error();
+            return node;
+        }
+        let dataType = this.CreateNode(scriptnode_1.eScriptNode.snDataType);
+        node.AddChildLast(dataType);
+        let ident = this.CreateNode(scriptnode_1.eScriptNode.snIdentifier);
+        ident.SetToken(token);
+        ident.UpdateSourcePosition(token.pos, token.length);
+        dataType.AddChildLast(ident);
+        // External shared declarations are ended with ';'
+        token = this.GetToken();
+        if (token.type == tokens_1.eTokenType.ttEndStatement) {
+            this.RewindTo(token);
+            node.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttEndStatement));
+            return node;
+        }
+        // check for the start of the declaration block
+        if (token.type != tokens_1.eTokenType.ttStartStatementBlock) {
+            this.RewindTo(token);
+            this.Error();
+            return node;
+        }
+        // while (token.type != eTokenType.ttEnd)
+        while (true) {
+            token = this.GetToken();
+            if (tokens_1.eTokenType.ttEndStatementBlock == token.type) {
+                this.RewindTo(token);
+                break;
+            }
+            if (tokens_1.eTokenType.ttIdentifier != token.type) {
+                this.Error();
+                return node;
+            }
+            // Add the enum element
+            ident = this.CreateNode(scriptnode_1.eScriptNode.snIdentifier);
+            ident.SetToken(token);
+            ident.UpdateSourcePosition(token.pos, token.length);
+            node.AddChildLast(ident);
+            token = this.GetToken();
+            if (token.type == tokens_1.eTokenType.ttAssignment) {
+                let tmp;
+                this.RewindTo(token);
+                tmp = this.ParseVarInit();
+                if (tmp != null) {
+                    node.AddChildLast(tmp);
+                }
+                if (this.isSyntaxError)
+                    return node;
+                token = this.GetToken();
+            }
+            if (tokens_1.eTokenType.ttListSeparator != token.type) {
+                this.RewindTo(token);
+                break;
+            }
+        }
+        // check for the end of the declaration block
+        token = this.GetToken();
+        if (token.type != tokens_1.eTokenType.ttEndStatementBlock) {
+            this.RewindTo(token);
+            this.Error();
+            return node;
+        }
+        return node;
+    }
+    ParseTypedef() {
+        // Create the typedef node
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snTypedef);
+        let token = this.GetToken();
+        if (token.type != tokens_1.eTokenType.ttTypedef) {
+            this.Error();
+            return node;
+        }
+        node.SetToken(token);
+        // Parse the base type
+        token = this.GetToken();
+        this.RewindTo(token);
+        // Make sure it is a primitive type (except ttVoid)
+        if (!this.IsRealType(token.type) || token.type == tokens_1.eTokenType.ttVoid) {
+            this.Error();
+            return node;
+        }
+        node.AddChildLast(this.ParseRealType());
+        node.AddChildLast(this.ParseIdentifier());
+        // Check for the end of the typedef
+        token = this.GetToken();
+        if (token.type != tokens_1.eTokenType.ttEndStatement) {
+            this.RewindTo(token);
+            this.Error();
+        }
+        return node;
+    }
+    ParseVarInit() {
+        // Tell the parser to validate the identifiers as valid types
+        this.checkValidTypes = true;
+        let scriptNode = null;
+        // If next token is assignment, parse expression
+        let t = this.GetToken();
+        if (t.type == tokens_1.eTokenType.ttAssignment) {
+            t = this.GetToken();
+            this.RewindTo(t);
+            if (t.type == tokens_1.eTokenType.ttStartStatementBlock)
+                scriptNode = this.ParseInitList();
+            else
+                scriptNode = this.ParseAssignment();
+        }
+        else if (t.type == tokens_1.eTokenType.ttOpenParanthesis) {
+            this.RewindTo(t);
+            scriptNode = this.ParseArgList();
+        }
+        else {
+            this.Error();
+        }
+        // Don't allow any more tokens after the expression
+        t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttEnd && t.type != tokens_1.eTokenType.ttEndStatement && t.type != tokens_1.eTokenType.ttListSeparator && t.type != tokens_1.eTokenType.ttEndStatementBlock) {
+            this.Error();
+        }
+        this.RewindTo(t);
+        this.checkValidTypes = false;
+        return scriptNode;
+    }
+    ParseVirtualPropertyDecl(isMethod, isInterface) {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snVirtualProperty);
+        let t1, t2;
+        t1 = this.GetToken();
+        t2 = this.GetToken();
+        this.RewindTo(t1);
+        // A class method can start with 'private' or 'protected'
+        if (isMethod && t1.type == tokens_1.eTokenType.ttPrivate)
+            node.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttPrivate));
+        else if (isMethod && t1.type == tokens_1.eTokenType.ttProtected)
+            node.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttProtected));
+        if (this.isSyntaxError)
+            return node;
+        node.AddChildLast(this.ParseType(true));
+        if (this.isSyntaxError)
+            return node;
+        let typeModResult = this.ParseTypeMod(false);
+        if (typeModResult) {
+            node.AddChildLast(typeModResult);
+        }
+        if (this.isSyntaxError)
+            return node;
+        node.AddChildLast(this.ParseIdentifier());
+        if (this.isSyntaxError)
+            return node;
+        t1 = this.GetToken();
+        if (t1.type != tokens_1.eTokenType.ttStartStatementBlock) {
+            this.Error();
+            return node;
+        }
+        for (;;) {
+            t1 = this.GetToken();
+            let accessorNode;
+            if (this.IdentifierIs(t1, tokens_1.GET_TOKEN) || this.IdentifierIs(t1, tokens_1.SET_TOKEN)) {
+                accessorNode = this.CreateNode(scriptnode_1.eScriptNode.snVirtualProperty);
+                node.AddChildLast(accessorNode);
+                this.RewindTo(t1);
+                accessorNode.AddChildLast(this.ParseIdentifier());
+                if (isMethod) {
+                    t1 = this.GetToken();
+                    this.RewindTo(t1);
+                    if (t1.type == tokens_1.eTokenType.ttConst)
+                        accessorNode.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttConst));
+                    if (!isInterface) {
+                        this.ParseMethodAttributes(accessorNode);
+                        if (this.isSyntaxError)
+                            return node;
+                    }
+                }
+                if (!isInterface) {
+                    t1 = this.GetToken();
+                    if (t1.type == tokens_1.eTokenType.ttStartStatementBlock) {
+                        this.RewindTo(t1);
+                        accessorNode.AddChildLast(this.ParseStatementBlock());
+                        if (this.isSyntaxError)
+                            return node;
+                    }
+                    else if (t1.type != tokens_1.eTokenType.ttEndStatement) {
+                        this.Error();
+                        return node;
+                    }
+                }
+                else {
+                    t1 = this.GetToken();
+                    if (t1.type != tokens_1.eTokenType.ttEndStatement) {
+                        this.Error();
+                        return node;
+                    }
+                }
+            }
+            else if (t1.type == tokens_1.eTokenType.ttEndStatementBlock)
+                break;
+            else {
+                this.Error();
+                return node;
+            }
+        }
+        return node;
+    }
+    ParseRealType() {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snDataType);
+        let t1 = this.GetToken();
+        if (!this.IsRealType(t1.type)) {
+            this.Error();
+            return node;
+        }
+        node.SetToken(t1);
+        return node;
+    }
+    ParseClass() {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snClass);
+        let t = this.GetToken();
+        // Allow the keywords 'shared', 'abstract', 'final', and 'external' before 'class'
+        while (this.IdentifierIs(t, tokens_1.SHARED_TOKEN) || this.IdentifierIs(t, tokens_1.ABSTRACT_TOKEN) || this.IdentifierIs(t, tokens_1.FINAL_TOKEN) || this.IdentifierIs(t, tokens_1.EXTERNAL_TOKEN)) {
+            this.RewindTo(t);
+            node.AddChildLast(this.ParseIdentifier());
+            t = this.GetToken();
+        }
+        if (t.type != tokens_1.eTokenType.ttClass) {
+            this.Error();
+            return node;
+        }
+        node.SetToken(t);
+        // if (engine -> ep.allowImplicitHandleTypes)
+        // {
+        //     // Parse 'implicit handle class' construct
+        //     GetToken(& t);
+        //     if (t.type == ttHandle)
+        //         node -> SetToken(& t);
+        //     else
+        //         RewindTo(& t);
+        // }
+        node.AddChildLast(this.ParseIdentifier());
+        // External shared declarations are ended with ';'
+        t = this.GetToken();
+        if (t.type == tokens_1.eTokenType.ttEndStatement) {
+            this.RewindTo(t);
+            node.AddChildLast(this.ParseToken(tokens_1.eTokenType.ttEndStatement));
+            return node;
+        }
+        // Optional list of interfaces that are being implemented and classes that are being inherited
+        if (t.type == tokens_1.eTokenType.ttColon) {
+            let inherit = this.CreateNode(scriptnode_1.eScriptNode.snIdentifier);
+            node.AddChildLast(inherit);
+            this.ParseOptionalScope(inherit);
+            inherit.AddChildLast(this.ParseIdentifier());
+            t = this.GetToken();
+            while (t.type == tokens_1.eTokenType.ttListSeparator) {
+                inherit = this.CreateNode(scriptnode_1.eScriptNode.snIdentifier);
+                node.AddChildLast(inherit);
+                this.ParseOptionalScope(inherit);
+                inherit.AddChildLast(this.ParseIdentifier());
+                t = this.GetToken();
+            }
+        }
+        if (t.type != tokens_1.eTokenType.ttStartStatementBlock) {
+            this.Error();
+            return node;
+        }
+        // Parse properties
+        t = this.GetToken();
+        this.RewindTo(t);
+        while (t.type != tokens_1.eTokenType.ttEndStatementBlock && t.type != tokens_1.eTokenType.ttEnd) {
+            // Is it a property or a method?
+            if (t.type == tokens_1.eTokenType.ttFuncDef)
+                node.AddChildLast(this.ParseFuncDef());
+            else if (this.IsFuncDecl(true))
+                node.AddChildLast(this.ParseFunction(true));
+            else if (this.IsVirtualPropertyDecl())
+                node.AddChildLast(this.ParseVirtualPropertyDecl(true, false));
+            else if (this.IsVarDecl())
+                node.AddChildLast(this.ParseDeclaration(true));
+            else if (t.type == tokens_1.eTokenType.ttEndStatement)
+                // Skip empty declarations
+                t = this.GetToken();
+            else {
+                this.Error();
+                return node;
+            }
+            if (this.isSyntaxError)
+                return node;
+            t = this.GetToken();
+            this.RewindTo(t);
+        }
+        t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttEndStatementBlock) {
+            this.Error();
+            return node;
+        }
+        node.UpdateSourcePosition(t.pos, t.length);
+        return node;
+    }
+    ParseFuncDef() {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snFuncDef);
+        // Allow keywords 'external' and 'shared' before 'interface'
+        let t1 = this.GetToken();
+        while (this.IdentifierIs(t1, tokens_1.SHARED_TOKEN) ||
+            this.IdentifierIs(t1, tokens_1.EXTERNAL_TOKEN)) {
+            this.RewindTo(t1);
+            node.AddChildLast(this.ParseIdentifier());
+            if (this.isSyntaxError)
+                return node;
+            t1 = this.GetToken();
+        }
+        if (t1.type != tokens_1.eTokenType.ttFuncDef) {
+            this.Error();
+            return node;
+        }
+        node.SetToken(t1);
+        node.AddChildLast(this.ParseType(true));
+        if (this.isSyntaxError)
+            return node;
+        let typeModResult = this.ParseTypeMod(false);
+        if (typeModResult) {
+            node.AddChildLast(typeModResult);
+        }
+        if (this.isSyntaxError)
+            return node;
+        node.AddChildLast(this.ParseIdentifier());
+        if (this.isSyntaxError)
+            return node;
+        node.AddChildLast(this.ParseParameterList());
+        if (this.isSyntaxError)
+            return node;
+        t1 = this.GetToken();
+        if (t1.type != tokens_1.eTokenType.ttEndStatement) {
+            this.Error();
+            return node;
+        }
+        node.UpdateSourcePosition(t1.pos, t1.length);
+        return node;
+    }
+    ParseNamespace() {
+        let node = this.CreateNode(scriptnode_1.eScriptNode.snNamespace);
+        let t1 = this.GetToken();
+        if (t1.type == tokens_1.eTokenType.ttNamespace)
+            node.UpdateSourcePosition(t1.pos, t1.length);
+        else {
+            this.Error();
+        }
+        // TODO: namespace: Allow declaration of multiple nested namespace with namespace A::B::C { }
+        node.AddChildLast(this.ParseIdentifier());
+        if (this.isSyntaxError)
+            return node;
+        t1 = this.GetToken();
+        if (t1.type == tokens_1.eTokenType.ttStartStatementBlock)
+            node.UpdateSourcePosition(t1.pos, t1.length);
+        else {
+            this.Error();
+            return node;
+        }
+        let start = t1;
+        node.AddChildLast(this.ParseScript(true));
+        if (!this.isSyntaxError) {
+            t1 = this.GetToken();
+            if (t1.type == tokens_1.eTokenType.ttEndStatementBlock)
+                node.UpdateSourcePosition(t1.pos, t1.length);
+            else {
+                if (t1.type == tokens_1.eTokenType.ttEnd)
+                    this.Error();
+                else {
+                    this.Error();
+                }
+                return node;
+            }
+        }
+        return node;
+    }
+    IsVirtualPropertyDecl() {
+        // Set start point so that we can rewind
+        let t = this.GetToken();
+        this.RewindTo(t);
+        // A class property decl can be preceded by 'private' or 'protected'
+        let t1 = this.GetToken();
+        if (t1.type != tokens_1.eTokenType.ttPrivate && t1.type != tokens_1.eTokenType.ttProtected)
+            this.RewindTo(t1);
+        // A variable decl starts with the type
+        let isTypeResult = this.IsType();
+        if (!isTypeResult[0] || isTypeResult[1] == null) {
+            this.RewindTo(t);
+            return false;
+        }
+        // Move to the token after the type
+        t1 = isTypeResult[1];
+        this.RewindTo(t1);
+        t1 = this.GetToken();
+        // The decl must have an identifier
+        if (t1.type != tokens_1.eTokenType.ttIdentifier) {
+            this.RewindTo(t);
+            return false;
+        }
+        // To be a virtual property it must also have a block for the get/set functions
+        t1 = this.GetToken();
+        if (t1.type == tokens_1.eTokenType.ttStartStatementBlock) {
+            this.RewindTo(t);
+            return true;
+        }
+        this.RewindTo(t);
+        return false;
+    }
+    IsFuncDecl(isMethod) {
+        // Set start point so that we can rewind
+        let t = this.GetToken();
+        this.RewindTo(t);
+        if (isMethod) {
+            // A class method decl can be preceded by 'private' or 'protected'
+            let t1, t2;
+            t1 = this.GetToken();
+            if (t1.type != tokens_1.eTokenType.ttPrivate && t1.type != tokens_1.eTokenType.ttProtected)
+                this.RewindTo(t1);
+            // A class constructor starts with identifier followed by parenthesis
+            // A class destructor starts with the ~ token
+            t1 = this.GetToken();
+            t2 = this.GetToken();
+            this.RewindTo(t1);
+            if ((t1.type == tokens_1.eTokenType.ttIdentifier && t2.type == tokens_1.eTokenType.ttOpenParanthesis) || t1.type == tokens_1.eTokenType.ttBitNot) {
+                this.RewindTo(t);
+                return true;
+            }
+        }
+        // A function decl starts with a type
+        let isTypeResult = this.IsType();
+        if (!isTypeResult[0] || isTypeResult[1] == null) {
+            this.RewindTo(t);
+            return false;
+        }
+        let t1 = isTypeResult[1];
+        // Move to the token after the type
+        this.RewindTo(t1);
+        t1 = this.GetToken();
+        // There can be an ampersand if the function returns a reference
+        if (t1.type == tokens_1.eTokenType.ttAmp) {
+            this.RewindTo(t);
+            return true;
+        }
+        if (t1.type != tokens_1.eTokenType.ttIdentifier) {
+            this.RewindTo(t);
+            return false;
+        }
+        t1 = this.GetToken();
+        if (t1.type == tokens_1.eTokenType.ttOpenParanthesis) {
+            // If the closing parenthesis is not followed by a
+            // statement block then it is not a function.
+            // It's possible that there are nested parenthesis due to default
+            // arguments so this should be checked for.
+            let nest = 0;
+            t1 = this.GetToken();
+            while ((nest || t1.type != tokens_1.eTokenType.ttCloseParanthesis) && t1.type != tokens_1.eTokenType.ttEnd) {
+                if (t1.type == tokens_1.eTokenType.ttOpenParanthesis)
+                    nest++;
+                if (t1.type == tokens_1.eTokenType.ttCloseParanthesis)
+                    nest--;
+                t1 = this.GetToken();
+            }
+            if (t1.type == tokens_1.eTokenType.ttEnd)
+                return false;
+            else {
+                if (isMethod) {
+                    // A class method can have a 'const' token after the parameter list
+                    t1 = this.GetToken();
+                    if (t1.type != tokens_1.eTokenType.ttConst)
+                        this.RewindTo(t1);
+                }
+                // A function may also have any number of additional attributes
+                for (;;) {
+                    t1 = this.GetToken();
+                    if (!this.IdentifierIs(t1, tokens_1.FINAL_TOKEN) &&
+                        !this.IdentifierIs(t1, tokens_1.OVERRIDE_TOKEN) &&
+                        !this.IdentifierIs(t1, tokens_1.EXPLICIT_TOKEN) &&
+                        !this.IdentifierIs(t1, tokens_1.PROPERTY_TOKEN)) {
+                        this.RewindTo(t1);
+                        break;
+                    }
+                }
+                t1 = this.GetToken();
+                this.RewindTo(t);
+                if (t1.type == tokens_1.eTokenType.ttStartStatementBlock)
+                    return true;
+            }
+            this.RewindTo(t);
+            return false;
+        }
+        this.RewindTo(t);
+        return false;
     }
     ParseFunction(isMethod = false) {
         let node = this.CreateNode(scriptnode_1.eScriptNode.snFunction);
@@ -206,10 +803,12 @@ class Parser {
         }
     }
     ParseStatementBlock() {
+        this.checkValidTypes = true;
         let node = this.CreateNode(scriptnode_1.eScriptNode.snStatementBlock);
         let t1 = this.GetToken();
         if (t1.type != tokens_1.eTokenType.ttStartStatementBlock) {
             this.Error();
+            this.checkValidTypes = false;
             return node;
         }
         let start = t1;
@@ -220,6 +819,7 @@ class Parser {
                 if (t1.type == tokens_1.eTokenType.ttEndStatementBlock) {
                     node.UpdateSourcePosition(t1.pos, t1.length);
                     // Statement block is finished
+                    this.checkValidTypes = false;
                     return node;
                 }
                 else {
@@ -256,6 +856,7 @@ class Parser {
                 }
                 else if (t1.type == tokens_1.eTokenType.ttEnd) {
                     this.Error();
+                    this.checkValidTypes = false;
                     return node;
                 }
                 this.isSyntaxError = false;
@@ -309,7 +910,6 @@ class Parser {
         if (this.isSyntaxError)
             return node;
         t = this.GetToken();
-        console.log(tokens_1.PrintToken(t, this.tokenizer.source.source));
         if (t.type != tokens_1.eTokenType.ttCloseParanthesis) {
             this.Error();
             return node;
@@ -615,7 +1215,10 @@ class Parser {
                 t = this.GetToken();
                 this.RewindTo(t);
                 if (t.type == tokens_1.eTokenType.ttAssignment || t.type == tokens_1.eTokenType.ttOpenParanthesis) {
-                    // node.AddChildLast(this.SuperficiallyParseVarInit());
+                    let varInit = this.ParseVarInit();
+                    if (varInit != null) {
+                        node.AddChildLast(varInit);
+                    }
                     if (this.isSyntaxError)
                         return node;
                 }
@@ -655,6 +1258,7 @@ class Parser {
                 return node;
             }
             else {
+                console.log(tokens_1.eTokenType[t.type]);
                 this.Error();
                 return node;
             }
@@ -869,6 +1473,7 @@ class Parser {
         return node;
     }
     ParseExpression() {
+        this.checkValidTypes = true;
         let node = this.CreateNode(scriptnode_1.eScriptNode.snExpression);
         node.AddChildLast(this.ParseExprTerm());
         if (this.isSyntaxError) {
@@ -877,14 +1482,18 @@ class Parser {
         for (;;) {
             let t = this.GetToken();
             this.RewindTo(t);
-            if (!this.IsOperator(t.type))
+            if (!this.IsOperator(t.type)) {
+                this.checkValidTypes = false;
                 return node;
+            }
             node.AddChildLast(this.ParseExprOperator());
             if (this.isSyntaxError) {
+                this.checkValidTypes = false;
                 return node;
             }
             node.AddChildLast(this.ParseExprTerm());
             if (this.isSyntaxError) {
+                this.checkValidTypes = false;
                 return node;
             }
         }
@@ -1275,15 +1884,16 @@ class Parser {
             return node;
         // Handle templates
         // If the datatype is a template type, then parse the subtype within the < >
-        // token = this.GetToken();
-        // this.RewindTo(token);
-        // let type = node.lastChild;
-        // tempString.Assign(&script->code[type->tokenPos], type->tokenLength);
-        // if( engine->IsTemplateType(tempString.AddressOf()) && t.type == ttLessThan )
-        // {
-        // 	ParseTemplTypeList(node);
-        // 	if (isSyntaxError) return node;
-        // }
+        token = this.GetToken();
+        this.RewindTo(token);
+        let type = node.lastChild;
+        // tempString.Assign(& script -> code[type -> tokenPos], type -> tokenLength);
+        if (token.type == tokens_1.eTokenType.ttLessThan) {
+            this.ParseTemplTypeList(node);
+            if (this.isSyntaxError) {
+                return node;
+            }
+        }
         // Parse [] and @
         token = this.GetToken();
         this.RewindTo(token);
@@ -1314,6 +1924,61 @@ class Parser {
             this.RewindTo(token);
         }
         return node;
+    }
+    ParseTemplTypeList(node, required = true) {
+        let isValid = true;
+        // Remember the last child, so we can restore the state if needed
+        let last = node.lastChild;
+        // Starts with '<'
+        let t = this.GetToken();
+        if (t.type != tokens_1.eTokenType.ttLessThan) {
+            if (required) {
+                this.Error();
+                // Error(ExpectedToken(asCTokenizer:: GetDefinition(ttLessThan)), & t);
+                // Error(InsteadFound(t), & t);
+            }
+            return false;
+        }
+        // At least one type
+        // TODO: child funcdef: Make this work with !required
+        node.AddChildLast(this.ParseType(true, false));
+        if (this.isSyntaxError) {
+            return false;
+        }
+        t = this.GetToken();
+        // Parse template types by list separator
+        while (t.type == tokens_1.eTokenType.ttListSeparator) {
+            // TODO: child funcdef: Make this work with !required
+            node.AddChildLast(this.ParseType(true, false));
+            if (this.isSyntaxError) {
+                return false;
+            }
+            t = this.GetToken();
+        }
+        // End with '>'
+        // Accept >> and >>> tokens too. But then force the tokenizer to move
+        // only 1 character ahead (thus splitting the token in two).
+        if (this.tokenizer.source.source[t.pos] != '>') {
+            if (required) {
+                this.Error();
+            }
+            else
+                isValid = false;
+        }
+        else {
+            // Break the token so that only the first > is parsed
+            this.tokenizer.SetPosition(t.pos + 1);
+        }
+        if (!required && !isValid) {
+            // Restore the original state before returning
+            while (node.lastChild != last) {
+                let n = node.lastChild;
+                n === null || n === void 0 ? void 0 : n.DisconnectParent();
+            }
+            return false;
+        }
+        // The template type list was parsed OK
+        return true;
     }
     ParseConstant() {
         let node = this.CreateNode(scriptnode_1.eScriptNode.snConstant);
@@ -1362,45 +2027,38 @@ class Parser {
         }
         // Handle templates
         // The innermost scope may be a template type
-        // if( t1.type == ttIdentifier && t2.type == ttLessThan )
-        // {
-        // 	tempString.Assign(&script->code[t1.pos], t1.length);
-        // 	if (engine->IsTemplateType(tempString.AddressOf()))
-        // 	{
-        // 		RewindTo(&t1);
-        // 		asCScriptNode *restore = scope->lastChild;
-        // 		scope->AddChildLast(ParseIdentifier());
-        // 		if (ParseTemplTypeList(scope, false))
-        // 		{
-        // 			GetToken(&t2);
-        // 			if (t2.type == ttScope)
-        // 			{
-        // 				// Template type is part of the scope
-        // 				// Nothing more needs to be done
-        // 				node->AddChildLast(scope);
-        // 				return;
-        // 			}
-        // 			else
-        // 			{
-        // 				// The template type is not part of the scope
-        // 				// Rewind to the template type and end the scope
-        // 				RewindTo(&t1);
-        // 				// Restore the previously parsed node
-        // 				while (scope->lastChild != restore)
-        // 				{
-        // 					asCScriptNode *last = scope->lastChild;
-        // 					last->DisconnectParent();
-        // 					last->Destroy(engine);
-        // 				}
-        // 				if( scope->lastChild )
-        // 					node->AddChildLast(scope);
-        // 				else
-        // 					scope->Destroy(engine);
-        // 				return;
-        // 			}
-        // 		}
-        // 	}
-        // }
+        if (t1.type == tokens_1.eTokenType.ttIdentifier && t2.type == tokens_1.eTokenType.ttLessThan) {
+            // tempString.Assign(&script->code[t1.pos], t1.length);
+            // if (engine->IsTemplateType(tempString.AddressOf()))
+            if (true) {
+                this.RewindTo(t1);
+                let restore = scope.lastChild;
+                scope.AddChildLast(this.ParseIdentifier());
+                if (this.ParseTemplTypeList(scope, false)) {
+                    t2 = this.GetToken();
+                    if (t2.type == tokens_1.eTokenType.ttScope) {
+                        // Template type is part of the scope
+                        // Nothing more needs to be done
+                        node.AddChildLast(scope);
+                        return;
+                    }
+                    else {
+                        // The template type is not part of the scope
+                        // Rewind to the template type and end the scope
+                        this.RewindTo(t1);
+                        // Restore the previously parsed node
+                        while (scope.lastChild != restore) {
+                            let last = scope.lastChild;
+                            last === null || last === void 0 ? void 0 : last.DisconnectParent();
+                        }
+                        if (scope.lastChild) {
+                            node.AddChildLast(scope);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
         // The identifier is not part of the scope
         this.RewindTo(t1);
         if (scope.lastChild != null) {
@@ -1519,8 +2177,11 @@ class Parser {
     }
     IsDataType(token) {
         if (token.type == tokens_1.eTokenType.ttIdentifier) {
-            // Something with builder-DoesTypeExist
-            return false;
+            if (this.checkValidTypes) {
+                // Something with builder-DoesTypeExist
+                return false;
+            }
+            return true;
         }
         if (this.IsRealType(token.type))
             return true;
@@ -1560,6 +2221,7 @@ class Parser {
         if (isTypeResult[1] != null) {
             t1 = isTypeResult[1];
         }
+        console.log(this.tokenizer.source.source.substr(t1.pos, t1.length));
         // Jump to the token after the type
         this.RewindTo(t1);
         t1 = this.GetToken();
@@ -1809,6 +2471,55 @@ class Parser {
     }
     CheckTemplateType(t) {
         // Is this a template type?
+        // return true;
+        // If the next token is a < then parse the sub-type too
+        let t1 = this.GetToken();
+        if (t1.type != tokens_1.eTokenType.ttLessThan) {
+            this.RewindTo(t1);
+            return true;
+        }
+        for (;;) {
+            // There might optionally be a 'const'
+            t1 = this.GetToken();
+            if (t1.type == tokens_1.eTokenType.ttConst)
+                t1 = this.GetToken();
+            // The type may be initiated with the scope operator
+            if (t1.type == tokens_1.eTokenType.ttScope)
+                t1 = this.GetToken();
+            // There may be multiple levels of scope operators
+            let t2 = this.GetToken();
+            while (t1.type == tokens_1.eTokenType.ttIdentifier && t2.type == tokens_1.eTokenType.ttScope) {
+                t1 = this.GetToken();
+                t1 = this.GetToken();
+            }
+            this.RewindTo(t2);
+            // Now there must be a data type
+            if (!this.IsDataType(t1))
+                return false;
+            if (!this.CheckTemplateType(t1))
+                return false;
+            t1 = this.GetToken();
+            // Is it a handle or array?
+            while (t1.type == tokens_1.eTokenType.ttHandle || t1.type == tokens_1.eTokenType.ttOpenBracket) {
+                if (t1.type == tokens_1.eTokenType.ttOpenBracket) {
+                    t1 = this.GetToken();
+                    if (t1.type != tokens_1.eTokenType.ttCloseBracket)
+                        return false;
+                }
+                t1 = this.GetToken();
+            }
+            // Was this the last template subtype?
+            if (t1.type != tokens_1.eTokenType.ttListSeparator)
+                break;
+        }
+        // Accept >> and >>> tokens too. But then force the tokenizer to move
+        // only 1 character ahead (thus splitting the token in two).
+        if (this.tokenizer.source.source[t1.pos] != '>')
+            return false;
+        else if (t1.length != 1) {
+            // We need to break the token, so that only the first character is parsed
+            this.tokenizer.SetPosition(t1.pos + 1);
+        }
         return true;
     }
     Error() {

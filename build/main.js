@@ -8,6 +8,12 @@ function objectId(object) {
         objIdMap.set(object, ++objectCount);
     return objIdMap.get(object) + "";
 }
+let script = `
+void What()
+{
+    TArray<int> x;
+}
+`;
 function PrintTree(tree) {
     let queue = [];
     queue.push(tree);
@@ -18,7 +24,8 @@ function PrintTree(tree) {
         if (!elem) {
             break;
         }
-        nodes.push({ id: objectId(elem), label: scriptnode_1.eScriptNode[elem.nodeType] });
+        let source = script.substr(elem.tokenPos, elem.tokenLength);
+        nodes.push({ id: objectId(elem), label: scriptnode_1.eScriptNode[elem.nodeType] + "\n" + source });
         for (let child = elem.firstChild; child; child = child.next) {
             edges.push({ from: objectId(elem), to: objectId(child) });
             if (child) {
@@ -32,34 +39,8 @@ function PrintTree(tree) {
         "edges": edges,
     };
 }
-console.log("Hello");
-let script = `
-int foo()
-{
-    for (int i = 0; i < 10; i++)
-    {
-        foo(x != false);
-    }
-}
-`;
 let parser = new parser_1.Parser(script);
-let root = parser.GetRootNode();
-let what = parser.ParseScript();
+let what = parser.DoParseScript();
 const tree = PrintTree(what);
-const example1 = {
-    "kind": { "tree": true },
-    "nodes": [
-        { "id": "1", "label": "1" },
-        { "id": "2", "label": "Function\n" + `
-void Test() {
-}
-`, "color": "orange" },
-        { "id": "3", "label": "3" }
-    ],
-    "edges": [
-        { "from": "1", "to": "2", "color": "red" },
-        { "from": "1", "to": "3" }
-    ]
-};
 debugger;
 //# sourceMappingURL=main.js.map
