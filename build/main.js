@@ -9,9 +9,10 @@ function objectId(object) {
     return objIdMap.get(object) + "";
 }
 let script = `
+UFUNCTION()
 void What()
 {
-    TArray<int> x;
+    #if
 }
 `;
 function PrintTree(tree) {

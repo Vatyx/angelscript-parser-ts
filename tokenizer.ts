@@ -1,4 +1,4 @@
-import { asETokenClass, CreateToken, eTokenType, Token, TokenWord, tokenWords, whiteSpace } from "./tokens";
+import { asETokenClass, CreateToken, eTokenType, Token, TokenWord, tokenWords, whiteSpace, UNREAL_TOKENS } from "./tokens";
 
 export class IntermediateSource
 {
@@ -67,7 +67,7 @@ export class Tokenizer
             let token = this.lastToken;
             this.source.UpdateStart(token.length);
 
-            if (token.type == eTokenType.ttWhiteSpace || token.type == eTokenType.ttOnelineComment || token.type == eTokenType.ttMultilineComment)
+            if (token.type == eTokenType.ttWhiteSpace || token.type == eTokenType.ttOnelineComment || token.type == eTokenType.ttMultilineComment || token.type == eTokenType.ttMacro)
             {
                 token = this.ConsumeToken();
             }
@@ -88,7 +88,7 @@ export class Tokenizer
                 this.source.UpdateStart(token.length);
             }
 
-        } while (token.type == eTokenType.ttWhiteSpace || token.type == eTokenType.ttOnelineComment || token.type == eTokenType.ttMultilineComment);
+        } while (token.type == eTokenType.ttWhiteSpace || token.type == eTokenType.ttOnelineComment || token.type == eTokenType.ttMultilineComment || token.type == eTokenType.ttMacro);
 
         return token;
     }
@@ -124,6 +124,12 @@ export class Tokenizer
         }
 
         token = this.IsComment(this.source);
+        if (token != null)
+        {
+            return token;
+        }
+
+        token = this.IsMacro(this.source);
         if (token != null)
         {
             return token;
@@ -213,10 +219,38 @@ export class Tokenizer
         return null;
     }
 
+    IsMacro(source: IntermediateSource): Token | null
+    {
+        for(let token of UNREAL_TOKENS)
+        {
+            if (source.length < token.length)
+            {
+                continue;
+            }
+
+            if (source.source.substr(source.start, token.length) != token)
+            {
+                continue;
+            }
+
+            let i;
+            for (i = 1; i < source.length; i++)
+            {
+                let c = source.Get(i);
+                if (c == "\n" || c == "\r")
+                {
+                    break;
+                }
+            }
+
+            return CreateToken(eTokenType.ttMacro, source.start, i, asETokenClass.asTC_UNKNOWN);
+        }
+
+        return null;
+    }
+
     IsIdentifier(source: IntermediateSource): Token | null
     {
-        // char is unsigned by default on some architectures, e.g. ppc and arm
-        // Make sure the value is always treated as signed in the below comparisons
         let c = source.Get(0);
 
         // Starting with letter or underscore

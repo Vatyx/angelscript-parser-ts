@@ -8,6 +8,7 @@ export enum eTokenType
     ttWhiteSpace,          // ' ', '\t', '\r', '\n', UTF8 byte-order-mark
     ttOnelineComment,      // // \n
     ttMultilineComment,    // /* */
+    ttMacro,
 
     // Atoms
     ttIdentifier,                  // abc123
@@ -188,6 +189,8 @@ export const IF_HANDLE_TOKEN = "if_handle_then_const";
 export const EXTERNAL_TOKEN = "external";
 export const EXPLICIT_TOKEN = "explicit";
 export const PROPERTY_TOKEN = "property";
+
+export const UNREAL_TOKENS = ["#", "UCLASS(", "USTRUCT(", "UPROPERTY(", "UFUNCTION(", "default ", "event ", "delegate "];
 
 export const tokenWords: TokenWord[] =
     [

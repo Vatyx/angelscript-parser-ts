@@ -19,9 +19,9 @@ interface edges {
 }
 
 let script = `
+UFUNCTION()
 void What()
 {
-    TArray<int> x;
 }
 `
 
