@@ -9,10 +9,9 @@ function objectId(object) {
     return objIdMap.get(object) + "";
 }
 let script = `
-UFUNCTION()
-void What()
+AWorldItem GetWorldItem() const
 {
-    #if
+    int& x = y;
 }
 `;
 function PrintTree(tree) {

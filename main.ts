@@ -19,9 +19,9 @@ interface edges {
 }
 
 let script = `
-UFUNCTION()
-void What()
+AWorldItem GetWorldItem() const
 {
+    int& x = y;
 }
 `
 

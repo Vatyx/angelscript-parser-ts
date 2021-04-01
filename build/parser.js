@@ -742,7 +742,7 @@ class Parser {
         // If it is a global function, or a method, except constructor and destructor, then the return type is parsed
         let token2 = this.GetToken();
         this.RewindTo(token);
-        if (!isMethod || (token.type != tokens_1.eTokenType.ttBitNot && token.type != tokens_1.eTokenType.ttOpenParanthesis)) {
+        if (!isMethod || (token.type != tokens_1.eTokenType.ttBitNot && token2.type != tokens_1.eTokenType.ttOpenParanthesis)) {
             node.AddChildLast(this.ParseType(true));
             if (this.isSyntaxError)
                 return node;
@@ -759,6 +759,7 @@ class Parser {
             if (this.isSyntaxError)
                 return node;
         }
+        console.log(this.tokenizer.source.source.substr(token.pos, token.length));
         node.AddChildLast(this.ParseIdentifier());
         if (this.isSyntaxError)
             return node;
@@ -1205,6 +1206,10 @@ class Parser {
         node.AddChildLast(this.ParseType(true, false, !isClassProp));
         if (this.isSyntaxError)
             return node;
+        let typeModResult = this.ParseTypeMod(false);
+        if (typeModResult != null) {
+            node.AddChildLast(typeModResult);
+        }
         for (;;) {
             // Parse identifier
             node.AddChildLast(this.ParseIdentifier());
@@ -1258,7 +1263,6 @@ class Parser {
                 return node;
             }
             else {
-                console.log(tokens_1.eTokenType[t.type]);
                 this.Error();
                 return node;
             }
@@ -1419,7 +1423,6 @@ class Parser {
             return node;
         let t = this.GetToken();
         this.RewindTo(t);
-        tokens_1.PrintToken(t, this.tokenizer.source.source);
         if (this.IsAssignOperator(t.type)) {
             node.AddChildLast(this.ParseAssignOperator());
             if (this.isSyntaxError)
@@ -2143,6 +2146,7 @@ class Parser {
         let node = this.CreateNode(scriptnode_1.eScriptNode.snIdentifier);
         let token = this.GetToken();
         if (token.type != tokens_1.eTokenType.ttIdentifier) {
+            console.log(tokens_1.eTokenType[token.type]);
             this.Error();
             return node;
         }
@@ -2179,7 +2183,7 @@ class Parser {
         if (token.type == tokens_1.eTokenType.ttIdentifier) {
             if (this.checkValidTypes) {
                 // Something with builder-DoesTypeExist
-                return false;
+                return true;
             }
             return true;
         }
@@ -2221,7 +2225,6 @@ class Parser {
         if (isTypeResult[1] != null) {
             t1 = isTypeResult[1];
         }
-        console.log(this.tokenizer.source.source.substr(t1.pos, t1.length));
         // Jump to the token after the type
         this.RewindTo(t1);
         t1 = this.GetToken();

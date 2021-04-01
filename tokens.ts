@@ -255,6 +255,7 @@ export const tokenWords: TokenWord[] =
         CreateTokenWord("cast", eTokenType.ttCast),
         CreateTokenWord("catch", eTokenType.ttCatch),
         CreateTokenWord("class", eTokenType.ttClass),
+        CreateTokenWord("struct", eTokenType.ttClass),
         CreateTokenWord("const", eTokenType.ttConst),
         CreateTokenWord("continue", eTokenType.ttContinue),
         CreateTokenWord("default", eTokenType.ttDefault),
